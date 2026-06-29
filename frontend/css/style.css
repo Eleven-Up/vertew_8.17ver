@@ -1,0 +1,452 @@
+/* Vertew Kiosk_UI styles.
+ *
+ * Flat-illustration SVG merchant character (no external assets). The
+ * Character_Renderer toggles classes on #character: expr-* (emotion), motion-*
+ * (gesture), character-idle-loop (ambient idle), and mouth-open on the
+ * .character-mouth <path> for lip-sync. Selectors are class-based so the
+ * .mouth-open rule (declared last) overrides expression mouth shapes. The kiosk
+ * runs in Chromium, so the CSS `d:` property is used to swap mouth path shapes.
+ */
+
+:root {
+  --skin: #ffd2b0;
+  --skin-shade: #f1b78d;
+  --hair: #43342b;
+  --hair-2: #534034;
+  --shirt: #fbf7ee;
+  --shirt-2: #ece5d5;
+  --apron: #2f9e72;
+  --apron-2: #207e59;
+  --lips: #c65b6e;
+  --iris: #5d4632;
+  --bg-1: #21376a;
+  --bg-2: #0d1530;
+  --halo: rgba(255, 255, 255, 0.05);
+  --accent: #ffd34d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: radial-gradient(circle at 50% 30%, var(--bg-1), var(--bg-2));
+  color: #fff;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+#stage {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ===========================================================================
+ * Character SVG
+ * ======================================================================== */
+#character {
+  width: min(46vh, 420px);
+  height: auto;
+}
+#c-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+
+/* All animatable parts pivot relative to their own box. */
+.c-vendor,
+.c-head,
+.c-arm,
+.c-eye,
+.c-eyelid,
+.c-brow,
+.character-mouth {
+  transform-box: fill-box;
+}
+
+/* --- Fills --- */
+.c-halo { fill: url(#haloG); }
+.sleeve { fill: url(#shirtG); }
+.hand { fill: var(--skin); }
+.neck { fill: var(--skin-shade); }
+.torso { fill: url(#shirtG); }
+.apron { fill: url(#apronG); }
+.pocket { fill: rgba(0, 0, 0, 0.12); }
+.strap { stroke: var(--apron-2); stroke-width: 13; stroke-linecap: round; fill: none; }
+.hair-back { fill: url(#hairG); }
+.hair-front { fill: url(#hairG); }
+.hair-hi { fill: rgba(255, 255, 255, 0.16); }
+.ear { fill: var(--skin-shade); }
+.face { fill: url(#faceG); }
+.cheek { fill: url(#cheekG); }
+.c-brow { stroke: var(--hair); stroke-width: 9; stroke-linecap: round; fill: none; }
+.eye-white { fill: #ffffff; }
+.iris { fill: url(#irisG); }
+.pupil { fill: #1c2230; }
+.hi-big { fill: rgba(255, 255, 255, 0.95); }
+.hi-sm { fill: rgba(255, 255, 255, 0.8); }
+.lash { stroke: #241812; stroke-width: 8; stroke-linecap: round; fill: none; }
+.lash-flick { stroke: #241812; stroke-width: 6; stroke-linecap: round; fill: none; }
+.c-eyelid { fill: var(--skin); transform-origin: center top; transform: scaleY(0); }
+.nose { fill: var(--skin-shade); }
+.character-mouth { fill: var(--lips); }
+
+/* Soft shading for a more illustrated, rounded look. */
+.c-head { filter: drop-shadow(0 12px 20px rgba(0, 0, 0, 0.25)); }
+.c-vendor { filter: drop-shadow(0 18px 28px rgba(0, 0, 0, 0.28)); }
+
+/* Pivots */
+.c-arm-left { transform-origin: 50% 12%; }
+.c-arm-right { transform-origin: 50% 12%; }
+.c-head { transform-origin: 50% 96%; }
+.c-eye { transform-origin: center; }
+.c-brow { transform-origin: center; transition: transform 0.18s ease; }
+.cheek { transition: opacity 0.2s ease; opacity: 0.55; }
+.eye-white,
+.iris { transition: transform 0.15s ease; }
+
+/* Default resting arm pose */
+.c-arm-left { transform: rotate(6deg); }
+.c-arm-right { transform: rotate(-6deg); }
+
+/* Blink always runs (eyelid only; does not fight expression eye transforms). */
+.c-eyelid { animation: blink 5s infinite; }
+
+/* ===========================================================================
+ * Expressions (expr-*)
+ * ======================================================================== */
+/* Happy */
+.expr-happy .c-brow { transform: translateY(-5px); }
+.expr-happy .c-eye { transform: scaleY(0.78); }
+.expr-happy .c-cheeks { opacity: 1; }
+.expr-happy .character-mouth { d: path("M168,256 Q200,300 232,256 Q200,278 168,256 Z"); }
+
+/* Neutral */
+.expr-neutral .character-mouth { d: path("M184,262 Q200,272 216,262 Q200,268 184,262 Z"); }
+
+/* Surprised */
+.expr-surprised .c-brow { transform: translateY(-16px); }
+.expr-surprised .c-eye { transform: scale(1.16); }
+.expr-surprised .character-mouth { d: path("M188,250 Q200,244 212,250 Q221,266 212,284 Q200,292 188,284 Q179,266 188,250 Z"); }
+
+/* Sad */
+.expr-sad .c-brow-left { transform: translateY(2px) rotate(16deg); }
+.expr-sad .c-brow-right { transform: translateY(2px) rotate(-16deg); }
+.expr-sad .c-eye { transform: translateY(3px) scaleY(0.9); }
+.expr-sad .character-mouth { d: path("M182,278 Q200,256 218,278 Q200,268 182,278 Z"); }
+
+/* Angry */
+.expr-angry .c-brow-left { transform: translateY(8px) rotate(-22deg); }
+.expr-angry .c-brow-right { transform: translateY(8px) rotate(22deg); }
+.expr-angry .c-eye { transform: scaleY(0.82); }
+.expr-angry .face { fill: #ffc9a6; }
+.expr-angry .character-mouth { d: path("M184,272 Q200,264 216,272 Q200,268 184,272 Z"); }
+
+/* Lip-sync (declared LAST → overrides expression mouth shapes while speaking). */
+.character-mouth.mouth-open {
+  d: path("M186,250 Q200,244 214,250 Q224,268 214,288 Q200,296 186,288 Q176,268 186,250 Z");
+  fill: #8a2f3f;
+}
+
+/* ===========================================================================
+ * Gestures (motion-*) — large, lively, Pixar-ish overshoot easing
+ * ======================================================================== */
+.motion-idle .c-arm-left { animation: sway-l 3.2s ease-in-out infinite; }
+.motion-idle .c-arm-right { animation: sway-r 3.2s ease-in-out infinite; }
+
+.motion-wave .c-arm-right { animation: wave 0.46s ease-in-out infinite; }
+.motion-wave .c-head { animation: tilt 1.2s ease-in-out infinite; }
+.motion-wave .c-vendor { animation: bounce 0.92s ease-in-out infinite; transform-origin: 50% 100%; }
+
+.motion-point .c-arm-right { animation: point 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+.motion-point .c-head { transform: rotate(5deg); }
+
+.motion-nod .c-head { animation: nod 0.6s ease-in-out infinite; }
+
+.motion-think .c-arm-left { animation: think-arm 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+.motion-think .c-head { transform: rotate(-10deg); }
+
+/* ===========================================================================
+ * Ambient idle loop: breathing + sway + slow head tilt + occasional wave
+ * ======================================================================== */
+.character-idle-loop .c-vendor { animation: breathe 3.4s ease-in-out infinite; transform-origin: 50% 100%; }
+.character-idle-loop .c-arm-left { animation: sway-l 3.4s ease-in-out infinite; }
+.character-idle-loop .c-arm-right { animation: idle-wave 6s ease-in-out infinite; }
+.character-idle-loop .c-head { animation: idle-tilt 5s ease-in-out infinite; }
+
+/* ===========================================================================
+ * Keyframes
+ * ======================================================================== */
+@keyframes blink {
+  0%, 92%, 100% { transform: scaleY(0); }
+  95%, 97% { transform: scaleY(1); }
+}
+@keyframes breathe {
+  0%, 100% { transform: translateY(0) scale(1) rotate(0deg); }
+  50% { transform: translateY(-10px) scale(1.02) rotate(-0.6deg); }
+}
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-16px); }
+}
+@keyframes sway-l {
+  0%, 100% { transform: rotate(6deg); }
+  50% { transform: rotate(16deg); }
+}
+@keyframes sway-r {
+  0%, 100% { transform: rotate(-6deg); }
+  50% { transform: rotate(-16deg); }
+}
+@keyframes idle-wave {
+  /* rests most of the time, then gives a friendly wave */
+  0%, 60%, 100% { transform: rotate(-6deg); }
+  68% { transform: rotate(-44deg); }
+  74% { transform: rotate(-18deg); }
+  80% { transform: rotate(-44deg); }
+  86% { transform: rotate(-10deg); }
+}
+@keyframes wave {
+  0% { transform: rotate(24deg); }
+  50% { transform: rotate(-44deg); }
+  100% { transform: rotate(24deg); }
+}
+@keyframes point {
+  0% { transform: rotate(-6deg); }
+  100% { transform: rotate(-70deg); }
+}
+@keyframes nod {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(13px) rotate(8deg); }
+}
+@keyframes tilt {
+  0%, 100% { transform: rotate(-9deg); }
+  50% { transform: rotate(9deg); }
+}
+@keyframes idle-tilt {
+  0%, 100% { transform: rotate(-3deg); }
+  50% { transform: rotate(3deg); }
+}
+@keyframes think-arm {
+  0% { transform: rotate(6deg); }
+  100% { transform: rotate(-52deg); }
+}
+
+/* ===========================================================================
+ * Listening indicator
+ * ======================================================================== */
+#listening-indicator {
+  position: absolute;
+  bottom: 8%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 22px;
+  background: rgba(255, 211, 77, 0.18);
+  border: 2px solid var(--accent);
+  border-radius: 999px;
+  font-size: 18px;
+  color: var(--accent);
+}
+#listening-indicator.visible { display: flex; }
+#listening-indicator::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1s ease-in-out infinite;
+}
+#listening-indicator::after { content: "듣고 있어요…"; }
+@keyframes pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.3); }
+}
+
+/* ===========================================================================
+ * Error banner
+ * ======================================================================== */
+#error-banner {
+  position: absolute;
+  top: 6%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  max-width: 80%;
+  padding: 14px 24px;
+  background: rgba(220, 70, 70, 0.92);
+  color: #fff;
+  border-radius: 12px;
+  font-size: 17px;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+#error-banner.visible { display: block; }
+
+/* ===========================================================================
+ * Greeting speech bubble (character "talks first" while idle)
+ * ======================================================================== */
+#greeting {
+  position: absolute;
+  top: 12%;
+  left: 50%;
+  transform: translateX(-50%) scale(0.9);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 26px;
+  background: #ffffff;
+  color: #1f2430;
+  border-radius: 22px;
+  text-align: center;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  animation: pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both,
+    bob 2.6s ease-in-out 0.4s infinite;
+}
+#greeting strong { font-size: 22px; }
+#greeting span { font-size: 15px; color: #6b7280; }
+/* little tail pointing down to the character */
+#greeting::after {
+  content: "";
+  position: absolute;
+  bottom: -12px;
+  left: 50%;
+  margin-left: -10px;
+  border: 12px solid transparent;
+  border-top-color: #ffffff;
+  border-bottom: 0;
+}
+body[data-state="idle"] #greeting { display: flex; }
+
+@keyframes pop-in {
+  0% { opacity: 0; transform: translateX(-50%) scale(0.6); }
+  100% { opacity: 1; transform: translateX(-50%) scale(1); }
+}
+@keyframes bob {
+  0%, 100% { margin-top: 0; }
+  50% { margin-top: -8px; }
+}
+
+/* ===========================================================================
+ * "Listening" animation (sound-wave bars) + attentive character lean-in
+ * ======================================================================== */
+#listen-wave {
+  position: absolute;
+  bottom: 13%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  align-items: flex-end;
+  gap: 7px;
+  height: 56px;
+}
+#listen-wave span {
+  width: 9px;
+  height: 16px;
+  border-radius: 6px;
+  background: var(--accent);
+  animation: eq 0.9s ease-in-out infinite;
+}
+#listen-wave span:nth-child(2) { animation-delay: 0.15s; }
+#listen-wave span:nth-child(3) { animation-delay: 0.3s; }
+#listen-wave span:nth-child(4) { animation-delay: 0.45s; }
+#listen-wave span:nth-child(5) { animation-delay: 0.6s; }
+body[data-state="listening"] #listen-wave { display: flex; }
+
+@keyframes eq {
+  0%, 100% { height: 14px; opacity: 0.6; }
+  50% { height: 52px; opacity: 1; }
+}
+
+/* Attentive lean-in while listening; gentle settle otherwise. */
+#c-svg { transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
+body[data-state="listening"] #c-svg { transform: translateY(-6px) scale(1.04); }
+body[data-state="speaking"] #c-svg { transform: scale(1.02); }
+
+/* ===========================================================================
+ * Conversation transcript (chat log)
+ * ======================================================================== */
+#chat-log {
+  position: absolute;
+  top: 4%;
+  right: 3%;
+  width: min(360px, 32vw);
+  max-height: 72vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.msg {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  font-size: 16px;
+  line-height: 1.4;
+  word-break: break-word;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  animation: msg-in 0.18s ease-out;
+}
+.msg--character {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.94);
+  color: #1a1a1a;
+  border-bottom-left-radius: 4px;
+}
+.msg--user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #2a2200;
+  border-bottom-right-radius: 4px;
+}
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===========================================================================
+ * Live speech-to-text caption
+ * ======================================================================== */
+#live-caption {
+  position: absolute;
+  bottom: 21%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  max-width: 80%;
+  padding: 12px 20px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  border: 1px dashed rgba(255, 255, 255, 0.5);
+  border-radius: 14px;
+  font-size: 20px;
+  text-align: center;
+}
+#live-caption.visible { display: block; }
+#live-caption.visible::after {
+  content: "▍";
+  margin-left: 2px;
+  animation: caret 0.8s steps(1) infinite;
+}
+@keyframes caret {
+  50% { opacity: 0; }
+}

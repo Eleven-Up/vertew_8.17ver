@@ -11,7 +11,7 @@ Each correctness property from the design is implemented as a single property-ba
 
 ## Tasks
 
-- [ ] 1. Set up project structure and test frameworks
+- [x] 1. Set up project structure and test frameworks
   - Create `backend/` (main.py, llm.py, prompt_builder.py, profanity.py, db.py, admin.py, models.py, requirements.txt) and `frontend/` (index.html, admin.html, js/, assets/) directories per the design repo structure
   - Add `scripts/kiosk.sh` placeholder and project README
   - Configure Python testing with **Hypothesis** + pytest in `backend/`
@@ -19,8 +19,8 @@ Each correctness property from the design is implemented as a single property-ba
   - Do not implement testing from scratch; use the established libraries
   - _Requirements: 9.1, 9.2_
 
-- [ ] 2. Implement core data models, value sets, and normalization
-  - [ ] 2.1 Define data models and allowed value sets
+- [x] 2. Implement core data models, value sets, and normalization
+  - [x] 2.1 Define data models and allowed value sets
     - Implement `CharacterResponse`, `StoreInfo`, `ConversationTurn` dataclasses
     - Define `EMOTIONS`, `GESTURES`, `DEFAULT_EMOTION`, `DEFAULT_GESTURE` as the single source of truth
     - Implement `normalize_emotion` / `normalize_gesture` returning the value when in-set and `neutral`/`idle` when missing, empty, or out-of-set
@@ -31,8 +31,8 @@ Each correctness property from the design is implemented as a single property-ba
     - **Validates: Requirements 4.6, 5.2, 5.6**
     - Use generators mixing in-set values with arbitrary/empty strings; assert every allowed value maps to exactly one defined expression/motion
 
-- [ ] 3. Implement Prompt_Builder
-  - [ ] 3.1 Implement prompt assembly
+- [x] 3. Implement Prompt_Builder
+  - [x] 3.1 Implement prompt assembly
     - Implement `build(persona, store_info, recent_turns, transcript)` assembling persona, current store/product info, transcript, and fixed instructions (JSON-only schema with non-empty text ≤500 chars, allowed emotion/gesture sets, grade-8 reading level, no-profanity, polite vendor tone)
     - Clamp recent turns to the last 5 in chronological order
     - When no store info exists, instruct the model to state no product info is available while still including persona and recent turns
@@ -50,8 +50,8 @@ Each correctness property from the design is implemented as a single property-ba
     - **Property 3: Recent-turn history is clamped to the five most recent in order**
     - **Validates: Requirements 3.2**
 
-- [ ] 4. Implement LLM_Client parsing and Gemini call
-  - [ ] 4.1 Implement response parsing and fallbacks
+- [x] 4. Implement LLM_Client parsing and Gemini call
+  - [x] 4.1 Implement response parsing and fallbacks
     - Implement `parse(raw)`: valid JSON with non-empty text/emotion/gesture extracts fields and truncates text to ≤1000 chars
     - Invalid/missing-field responses return `FALLBACK_UNDERSTAND` (neutral/idle); define fallback constants
     - _Requirements: 4.2, 4.4_
@@ -64,7 +64,7 @@ Each correctness property from the design is implemented as a single property-ba
     - **Property 5: Malformed or incomplete responses become the neutral understanding fallback**
     - **Validates: Requirements 4.4**
 
-  - [ ] 4.4 Implement Gemini Flash call with timeout, single-call, and retry
+  - [x] 4.4 Implement Gemini Flash call with timeout, single-call, and retry
     - Implement `complete(prompt)` behind an HTTP boundary interface: exactly one logical Gemini call per turn, 10s timeout, at most one retry on failure/timeout
     - _Requirements: 4.1, 9.3, 9.4, 9.6_
 
@@ -78,8 +78,8 @@ Each correctness property from the design is implemented as a single property-ba
     - **Validates: Requirements 9.6**
     - Mock failing/timing-out requests; assert at most two attempts before reporting failure
 
-- [ ] 5. Implement ProfanityFilter
-  - [ ] 5.1 Implement profanity filtering
+- [x] 5. Implement ProfanityFilter
+  - [x] 5.1 Implement profanity filtering
     - Implement `apply(resp)`: if text matches any configured term, replace the whole response with `FALLBACK_COURTEOUS` (which contains no flagged terms); otherwise return unchanged
     - _Requirements: 10.1, 10.2_
 
@@ -88,8 +88,8 @@ Each correctness property from the design is implemented as a single property-ba
     - **Validates: Requirements 10.1, 10.2**
     - Use generators embedding configured terms at varying positions plus clean-text generators
 
-- [ ] 6. Implement Data_Store repository and SQLite persistence
-  - [ ] 6.1 Implement schema and repository operations
+- [x] 6. Implement Data_Store repository and SQLite persistence
+  - [x] 6.1 Implement schema and repository operations
     - Create SQLite schema (`store_info` single-row, `conversation_turn` insert-only)
     - Implement `record_turn` (customer text, response text, completion timestamp) with at most one retry on write failure, and single-row upsert for store info
     - Implement startup load of store info; on load failure expose a flag that blocks new turns
@@ -109,8 +109,8 @@ Each correctness property from the design is implemented as a single property-ba
     - Test that a failed startup load presents an error indication and blocks new turns
     - _Requirements: 8.4_
 
-- [ ] 7. Implement Admin_Interface validation and routes
-  - [ ] 7.1 Implement store-info validation
+- [x] 7. Implement Admin_Interface validation and routes
+  - [x] 7.1 Implement store-info validation
     - Validate store/product fields (1–2000 chars, required) and persona (1–500 chars when set); reject invalid submissions while identifying the invalid field
     - _Requirements: 7.3, 7.4_
 
@@ -118,7 +118,7 @@ Each correctness property from the design is implemented as a single property-ba
     - **Property 16: Store-info validation accepts only well-formed fields**
     - **Validates: Requirements 7.3, 7.4**
 
-  - [ ] 7.3 Implement `/admin` HTTP routes
+  - [x] 7.3 Implement `/admin` HTTP routes
     - Serve current store/product info (empty fields when none exist), accept submissions, persist via Data_Store, return confirmation; on storage failure retain entered values and show save error
     - _Requirements: 7.1, 7.2, 7.5, 7.6_
 
@@ -126,8 +126,8 @@ Each correctness property from the design is implemented as a single property-ba
     - Test display-within-time, empty-field display, confirmation, and storage-failure retention paths
     - _Requirements: 7.1, 7.2, 7.5_
 
-- [ ] 8. Implement Conversation_Server orchestration and endpoints
-  - [ ] 8.1 Implement transcript handling pipeline
+- [x] 8. Implement Conversation_Server orchestration and endpoints
+  - [x] 8.1 Implement transcript handling pipeline
     - Wire `handle_transcript`: Prompt_Builder → LLM_Client.complete → parse → ProfanityFilter → Data_Store.record_turn → return response
     - On Gemini unreachable/error/timeout, return `FALLBACK_UNAVAILABLE` (neutral/idle); abort with no partial output
     - _Requirements: 4.3, 4.5, 9.5_
@@ -137,7 +137,7 @@ Each correctness property from the design is implemented as a single property-ba
     - **Validates: Requirements 4.5**
     - Mock unreachable/error/timeout Gemini responses; assert temporarily-unavailable fallback with neutral/idle
 
-  - [ ] 8.3 Implement WebSocket and wiring to admin app
+  - [x] 8.3 Implement WebSocket and wiring to admin app
     - Expose the localhost WebSocket for the conversation loop and mount the admin routes in `main.py`
     - _Requirements: 9.1, 9.2_
 
@@ -145,11 +145,11 @@ Each correctness property from the design is implemented as a single property-ba
     - Verify single Gemini call with 10s timeout (4.1, 9.4) and that the server's outbound requests are limited to STT + Gemini (9.2)
     - _Requirements: 4.1, 9.2, 9.4_
 
-- [ ] 9. Checkpoint - server core complete
+- [x] 9. Checkpoint - server core complete
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 10. Implement browser Speech_Module
-  - [ ] 10.1 Implement STT provider and TTS engine behind interfaces
+- [x] 10. Implement browser Speech_Module
+  - [x] 10.1 Implement STT provider and TTS engine behind interfaces
     - Implement `SttProvider` (mic start/stop, end-of-speech, no-match, error) and `TtsEngine` (local English synthesis, availability) so the STT backend is replaceable without changing UI or server
     - Forward only transcripts with ≥1 recognized word; skip synthesis for empty/whitespace text
     - Apply capture timing constants (500ms activation, 200ms indicator, 2–3s silence, 10s no-speech, 30s max, 5s STT result)
@@ -163,8 +163,8 @@ Each correctness property from the design is implemented as a single property-ba
     - Test STT timeout path (2.5), STT conversion latency (2.1), TTS issuing zero network requests (6.2), English voice configured (6.3), provider behind replaceable interface (2.6)
     - _Requirements: 2.1, 2.5, 2.6, 6.2, 6.3_
 
-- [ ] 11. Implement Kiosk_UI state machine
-  - [ ] 11.1 Implement the conversation state machine and tap handling
+- [x] 11. Implement Kiosk_UI state machine
+  - [x] 11.1 Implement the conversation state machine and tap handling
     - Implement states idle/listening/processing/speaking/error with transitions per the design; honor taps only in idle, ignore in listening and speaking
     - Show listening indicator within 200ms and keep visible while mic active; return to idle within 1s after voice output
     - Handle error banners for mic-unavailable, STT empty/retry (≤3), network, and TTS failures with defined recovery states
@@ -182,8 +182,8 @@ Each correctness property from the design is implemented as a single property-ba
     - Test mic activation/indicator latency (1.2, 1.3), silence/max-capture/no-speech timers (1.4, 1.6, 1.7), TTS start and return-to-idle (6.1, 6.5, 6.6)
     - _Requirements: 1.2, 1.3, 1.4, 1.6, 1.7, 6.1, 6.5, 6.6_
 
-- [ ] 12. Implement Character_Renderer
-  - [ ] 12.1 Implement 2D character rendering
+- [x] 12. Implement Character_Renderer
+  - [x] 12.1 Implement 2D character rendering
     - Render the single 2D character; map each emotion to one expression and each gesture to one motion, normalizing unknown/empty to neutral/idle without interrupting rendering
     - Loop idle animation when no conversation is active; start/stop lip-sync within 150ms of voice output
     - Begin rendering a recognized response within 500ms of receipt
@@ -193,8 +193,8 @@ Each correctness property from the design is implemented as a single property-ba
     - Test idle animation (5.3), lip-sync start/stop timing (5.4, 5.5), and unknown-value normalization rendering (5.2)
     - _Requirements: 5.2, 5.3, 5.4, 5.5_
 
-- [ ] 13. Wire browser components and connect to the server
-  - [ ] 13.1 Integrate Speech_Module, Kiosk_UI, and Character_Renderer over localhost
+- [x] 13. Wire browser components and connect to the server
+  - [x] 13.1 Integrate Speech_Module, Kiosk_UI, and Character_Renderer over localhost
     - Implement `chat.js` to send transcripts and receive `{text, emotion, gesture}` over the localhost WebSocket; route responses to Character_Renderer and Speech_Module; ignore taps during TTS
     - Ensure the Kiosk_UI issues no internet requests
     - _Requirements: 4.3, 5.1, 6.4, 9.1_
@@ -203,8 +203,8 @@ Each correctness property from the design is implemented as a single property-ba
     - Verify the Kiosk_UI talks only to localhost and issues no internet requests (9.1)
     - _Requirements: 9.1_
 
-- [ ] 14. Implement kiosk deployment script
-  - [ ] 14.1 Implement Chromium fullscreen autostart
+- [x] 14. Implement kiosk deployment script
+  - [x] 14.1 Implement Chromium fullscreen autostart
     - Implement `scripts/kiosk.sh` to launch Chromium in fullscreen/kiosk mode hiding navigation, address bar, and cursor after 5s idle; retry launch up to 3 times then show an on-screen failure indication
     - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5_
 
@@ -212,7 +212,7 @@ Each correctness property from the design is implemented as a single property-ba
     - Verify autostart fullscreen flags hide navigation/address bar (11.1, 11.3) and launch-retry behavior (11.5)
     - _Requirements: 11.1, 11.3, 11.5_
 
-- [ ] 15. Final checkpoint - ensure all tests pass
+- [x] 15. Final checkpoint - ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes

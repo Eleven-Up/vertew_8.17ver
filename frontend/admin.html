@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vertew Admin</title>
+  </head>
+  <body>
+    <!-- Vendor-facing Admin_Interface: store/product/persona form.
+         At runtime the Conversation_Server serves this page server-rendered at
+         GET /admin with the current values pre-filled (empty when none exist),
+         and the form posts back to POST /admin. This static copy documents the
+         expected field names (store_name, products, persona) and route path. -->
+    <main id="admin">
+      <h1>Store &amp; product information</h1>
+      <form id="admin-form" method="post" action="/admin">
+        <label for="store_name">Store name (required)</label>
+        <input id="store_name" name="store_name" type="text" maxlength="2000" />
+
+        <label for="products">Products (required)</label>
+        <textarea id="products" name="products" maxlength="2000"></textarea>
+
+        <label for="persona">Persona (optional)</label>
+        <textarea id="persona" name="persona" maxlength="500"></textarea>
+
+        <button type="submit">Save</button>
+      </form>
+    </main>
+  </body>
+</html>

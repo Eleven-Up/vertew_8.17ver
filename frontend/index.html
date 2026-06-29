@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>Vertew</title>
+    <link rel="stylesheet" href="./css/style.css" />
+    <!-- Inline favicon to avoid the harmless /favicon.ico 404 in the browser. -->
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <!-- Customer-facing Kiosk_UI: character + listening indicator + error banner.
+         The conversation state machine, Speech_Module, and Character_Renderer are
+         wired by ./js/main.js. Emotion/gesture/idle/lip-sync are driven via CSS
+         classes on #character; the .character-mouth child is the lip-sync mouth. -->
+    <main id="stage">
+      <div id="character">
+        <svg id="c-svg" viewBox="0 0 400 580" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <defs>
+            <radialGradient id="faceG" cx="42%" cy="34%" r="75%">
+              <stop offset="0%" stop-color="#ffe4c8" />
+              <stop offset="100%" stop-color="#f3b78d" />
+            </radialGradient>
+            <linearGradient id="hairG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#5b4334" />
+              <stop offset="100%" stop-color="#382318" />
+            </linearGradient>
+            <radialGradient id="irisG" cx="45%" cy="35%" r="65%">
+              <stop offset="0%" stop-color="#8fd3ec" />
+              <stop offset="55%" stop-color="#3f93c4" />
+              <stop offset="100%" stop-color="#22597f" />
+            </radialGradient>
+            <linearGradient id="shirtG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#fffdf7" />
+              <stop offset="100%" stop-color="#e7e0d0" />
+            </linearGradient>
+            <linearGradient id="apronG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#37b083" />
+              <stop offset="100%" stop-color="#1f7d57" />
+            </linearGradient>
+            <radialGradient id="cheekG" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#ff8f8f" stop-opacity="0.85" />
+              <stop offset="100%" stop-color="#ff8f8f" stop-opacity="0" />
+            </radialGradient>
+            <radialGradient id="haloG" cx="50%" cy="42%" r="60%">
+              <stop offset="0%" stop-color="rgba(255,255,255,0.10)" />
+              <stop offset="100%" stop-color="rgba(255,255,255,0)" />
+            </radialGradient>
+          </defs>
+
+          <ellipse class="c-halo" cx="200" cy="250" rx="200" ry="220" fill="url(#haloG)" />
+
+          <g class="c-vendor">
+            <!-- arms (behind body) -->
+            <g class="c-arm c-arm-left">
+              <rect class="sleeve" x="88" y="324" width="62" height="176" rx="31" />
+              <circle class="hand" cx="119" cy="500" r="31" />
+            </g>
+            <g class="c-arm c-arm-right">
+              <rect class="sleeve" x="250" y="324" width="62" height="176" rx="31" />
+              <circle class="hand" cx="281" cy="500" r="31" />
+            </g>
+
+            <!-- body -->
+            <rect class="neck" x="180" y="292" width="40" height="52" rx="16" />
+            <path class="torso" d="M122,348 Q200,312 278,348 L308,580 L92,580 Z" />
+            <path class="strap" d="M172,384 L152,340" />
+            <path class="strap" d="M228,384 L248,340" />
+            <rect class="apron" x="150" y="382" width="100" height="198" rx="22" />
+            <rect class="pocket" x="168" y="486" width="64" height="46" rx="10" />
+
+            <!-- head -->
+            <g class="c-head">
+              <ellipse class="hair-back" cx="200" cy="176" rx="126" ry="128" />
+              <ellipse class="ear" cx="98" cy="206" rx="17" ry="24" />
+              <ellipse class="ear" cx="302" cy="206" rx="17" ry="24" />
+              <ellipse class="face" cx="200" cy="200" rx="106" ry="114" />
+
+              <!-- rosy cheeks -->
+              <ellipse class="cheek c-cheeks" cx="132" cy="238" rx="28" ry="17" />
+              <ellipse class="cheek c-cheeks" cx="268" cy="238" rx="28" ry="17" />
+
+              <!-- eyebrows (stroked, expressive) -->
+              <path class="c-brow c-brow-left" d="M122,150 Q158,134 192,150" />
+              <path class="c-brow c-brow-right" d="M208,150 Q242,134 278,150" />
+
+              <!-- BIG Disney eyes -->
+              <g class="c-eye c-eye-left">
+                <ellipse class="eye-white" cx="156" cy="202" rx="31" ry="36" />
+                <circle class="iris" cx="158" cy="206" r="23" />
+                <circle class="pupil" cx="158" cy="207" r="11" />
+                <circle class="hi-big" cx="149" cy="197" r="8.5" />
+                <circle class="hi-sm" cx="166" cy="214" r="4" />
+                <path class="lash" d="M124,190 Q156,166 190,190" />
+                <path class="lash-flick" d="M190,190 Q200,186 206,180" />
+                <ellipse class="c-eyelid" cx="156" cy="202" rx="33" ry="38" />
+              </g>
+              <g class="c-eye c-eye-right">
+                <ellipse class="eye-white" cx="244" cy="202" rx="31" ry="36" />
+                <circle class="iris" cx="242" cy="206" r="23" />
+                <circle class="pupil" cx="242" cy="207" r="11" />
+                <circle class="hi-big" cx="233" cy="197" r="8.5" />
+                <circle class="hi-sm" cx="250" cy="214" r="4" />
+                <path class="lash" d="M210,190 Q244,166 276,190" />
+                <path class="lash-flick" d="M210,190 Q200,186 194,180" />
+                <ellipse class="c-eyelid" cx="244" cy="202" rx="33" ry="38" />
+              </g>
+
+              <!-- tiny button nose -->
+              <path class="nose" d="M193,238 Q200,248 207,238 Q200,244 193,238 Z" />
+
+              <!-- mouth -->
+              <path class="character-mouth" d="M182,262 Q200,274 218,262 Q200,270 182,262 Z" />
+
+              <!-- glossy fringe with highlight -->
+              <path class="hair-front" d="M96,156 Q112,92 200,88 Q288,92 304,156 Q256,112 200,118 Q144,112 96,156 Z" />
+              <path class="hair-hi" d="M150,116 Q190,100 232,112 Q198,108 150,116 Z" />
+            </g>
+          </g>
+        </svg>
+      </div>
+
+      <!-- Character speech bubble: greets the customer while idle. -->
+      <div id="greeting">
+        <strong>안녕하세요! 무엇을 도와드릴까요?</strong>
+        <span>화면을 탭하면 대화가 시작돼요</span>
+      </div>
+
+      <!-- "I'm listening" animation: sound-wave bars while the mic is active. -->
+      <div id="listen-wave" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+
+      <!-- Live speech-to-text caption: shows the customer's words in real time. -->
+      <div id="live-caption"></div>
+
+      <!-- Running conversation transcript (customer + character bubbles). -->
+      <aside id="chat-log"></aside>
+    </main>
+
+    <script type="module" src="./js/main.js"></script>
+  </body>
+</html>
