@@ -1,0 +1,43 @@
+# ---- Python (backend) ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+*.log
+
+# Local SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment / secrets (Gemini API key, etc.)
+.env
+.env.*
+!.env.example
+
+# ---- Node / TypeScript (frontend) ----
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ---- OS / Editor ----
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Keep Kiro spec/steering files tracked (do NOT ignore .kiro)
