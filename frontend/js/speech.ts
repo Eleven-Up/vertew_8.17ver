@@ -170,8 +170,12 @@ export class WebSpeechSttProvider implements SttProvider {
   private speechStarted = false;
   private settled = false;
 
-  constructor(private readonly lang: string = "en-US") {
+  constructor(private lang: string = "en-US") {
     this.ctor = getSpeechRecognitionCtor();
+  }
+
+  setLanguage(lang: string): void {
+    this.lang = lang;
   }
 
   onResult(cb: (r: SttResult) => void): void {
@@ -363,7 +367,11 @@ export class WebSpeechSttProvider implements SttProvider {
  * zero network traffic (Req 6.2) and English-only for the MVP demo (Req 6.3).
  */
 export class WebSpeechTtsEngine implements TtsEngine {
-  constructor(private readonly lang: string = "en-US") {}
+  constructor(private lang: string = "en-US") {}
+
+  setLanguage(lang: string): void {
+    this.lang = lang;
+  }
 
   isAvailable(): boolean {
     return (

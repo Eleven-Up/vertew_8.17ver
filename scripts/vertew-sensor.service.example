@@ -1,0 +1,16 @@
+[Unit]
+Description=Vertew Raspberry Pi / ESP32 sensor bridge
+After=network-online.target vertew-backend.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/vertew/backend
+EnvironmentFile=/opt/vertew/backend/.env
+# ESP32 example. Replace with --adapter gpio for HC-SR04 connected to Pi pins.
+ExecStart=/opt/vertew/.venv/bin/python hardware_bridge.py --adapter serial --port /dev/ttyUSB0
+Restart=always
+RestartSec=3
+User=pi
+
+[Install]
+WantedBy=multi-user.target

@@ -1,104 +1,192 @@
-// main.ts: Kiosk_UI browser entry point.
-//
-// Referenced by index.html as `./js/main.js`. Wires the three browser components
-// together over the localhost WebSocket to the Conversation_Server:
-//
-//   Speech_Module (WebSpeechSttProvider + WebSpeechTtsEngine)
-//     -> KioskController (conversation state machine)
-//     -> Character_Renderer (DomCharacterRenderer bound to #character)
-//     -> ChatClient (localhost WebSocket) -> Conversation_Server
-//
-// Everything here runs locally in the browser; the only connection opened is the
-// localhost conversation socket, so the Kiosk_UI issues no internet requests
-// (Req 9.1). A document/#stage tap drives the push-to-talk start (Req 1.x), and
-// taps during TTS are ignored by the controller (Req 6.4).
-
+import QRCode from "qrcode";
 import { createCharacterRenderer } from "./character.js";
 import { ChatClient, buildWsUrl } from "./chat.js";
 import { createChatLog } from "./chatlog.js";
+import { analyzeTranscript, createCustomerSession, getCustomerSession, getReadyOrders, EventVideoQueue, loadMediaConfig, StoreEventClient, type StoreEvent } from "./hologram.js";
 import { KioskController, createDomKioskView } from "./kiosk.js";
 import { WebSpeechSttProvider, WebSpeechTtsEngine } from "./speech.js";
 
-/**
- * Construct and wire the Kiosk_UI. Returns the controller and chat client so a
- * harness/test can drive them; called automatically on DOM ready in the browser.
- */
-export function startKiosk(): { controller: KioskController; chat: ChatClient } {
-  // Character_Renderer bound to #character (index.html). Throws if absent.
+const STORE_ID = "demo";
+const readyCopy: Record<string, (number: number) => string> = {
+  en: (number) => `Order number ${number}! Your order is ready!`,
+  ko: (number) => `${number}번 고객님! 주문하신 상품이 준비되었습니다!`,
+  ms: (number) => `Pesanan nombor ${number}! Pesanan anda sudah siap!`,
+};
+
+export async function startKiosk(): Promise<void> {
+  const params = new URLSearchParams(window.location.search);
+  const displayMode = params.get("display") === "tablet" ? "tablet" : "hologram";
+  const debug = params.get("debug") !== "false";
+  document.body.dataset.display = displayMode;
+  document.body.classList.toggle("debug-enabled", debug);
+
+  const [media, session] = await Promise.all([loadMediaConfig(STORE_ID), restoreSession(STORE_ID)]);
+  const sessionId = session.id;
+  window.sessionStorage.setItem(`vertew-session-${STORE_ID}`, sessionId);
+  const qrUrl = `${window.location.origin}/order/store/${STORE_ID}?session=${sessionId}`;
+  await renderQr(qrUrl);
+
   const renderer = createCharacterRenderer();
-
-  // Speech_Module: replaceable STT provider + local English TTS (Req 2.6, 6.2/6.3).
-  // Korean demo: capture and synthesize in Korean.
-  const stt = new WebSpeechSttProvider("ko-KR");
-  const tts = new WebSpeechTtsEngine("ko-KR");
-
-  // Listening indicator + error banner, created inside #stage.
+  const stt = new WebSpeechSttProvider("en-US");
+  const tts = new WebSpeechTtsEngine("en-US");
   const view = createDomKioskView();
-
-  // On-screen conversation transcript + live speech caption.
   const chatLog = createChatLog();
+  const video = required<HTMLVideoElement>("hologram-video");
+  const videoQueue = new EventVideoQueue(video, media, (state, playing) => {
+    document.body.classList.toggle("video-playing", playing);
+    document.body.dataset.hologramState = playing ? state : "interactive";
+    required("state-label").textContent = playing ? media.assets[state]?.label ?? state : "Interactive";
+  });
 
-  // Localhost conversation socket. URL derived from the page origin so it never
-  // targets the internet (Req 9.1).
-  const chat = new ChatClient({ url: buildWsUrl(window.location) });
-
-  // Conversation state machine. Transcripts are pushed to the server via the chat
-  // client when the UI moves listening -> processing (Req 4.3). The final
-  // transcript is also logged as a customer bubble and clears the live caption.
   const controller = new KioskController({
-    stt,
-    tts,
-    renderer,
-    view,
+    stt, tts, renderer, view,
     onSendTranscript: (text) => {
       chatLog.addUser(text);
       chatLog.clearLiveCaption();
-      chat.send(text);
+      void analyzeTranscript(sessionId, text)
+        .then((result) => {
+          currentLanguage = result.current_language;
+          const locale = speechLocale(currentLanguage);
+          stt.setLanguage(locale);
+          tts.setLanguage(locale);
+          required("language-label").textContent = currentLanguage.toUpperCase();
+          chat.send(text);
+        })
+        .catch(() => chat.send(text));
     },
-    // Reflect the conversation state on <body data-state> so the page can show
-    // the idle greeting, the listening animation, the speaking cue, etc.
-    onStateChange: (state) => {
-      document.body.dataset.state = state;
-    },
+    onStateChange: (state) => { document.body.dataset.state = state; },
   });
-
-  // Stream live speech-to-text into the caption as the customer speaks.
   stt.onPartial?.((text) => chatLog.setLiveCaption(text));
 
-  // Route server responses back into the state machine (Req 5.1) and log the
-  // character's reply as a bubble; a socket failure during a turn surfaces as a
-  // network error and recovers to idle (Req 2.5/9.5).
-  chat.onResponse((response) => {
-    controller.onServerResponse(response);
-    chatLog.addCharacter(response.text);
-  });
+  const chatPath = `/ws?session_id=${encodeURIComponent(sessionId)}`;
+  const chat = new ChatClient({ url: buildWsUrl(window.location, chatPath) });
+  chat.onResponse((response) => { controller.onServerResponse(response); chatLog.addCharacter(response.text); });
   chat.onNetworkError(() => controller.showError("network"));
-
-  // Open the socket up front so the first turn does not pay the connect latency.
   chat.connect();
 
-  // Push-to-talk: a screen tap anywhere on the stage starts a turn. The controller
-  // honors the tap only in idle and ignores it during listening/speaking
-  // (Req 1.5, 6.4). Clear any stale live caption when a new capture begins.
-  const stage = document.getElementById("stage") ?? document.body;
-  stage.addEventListener("pointerdown", () => {
-    chatLog.clearLiveCaption();
-    controller.onTap();
+  let currentLanguage = session.language;
+  const announcedOrders = new Set<string>();
+  const eventUrl = buildStoreWsUrl(sessionId, debug ? "debug" : "hologram");
+  const events = new StoreEventClient(eventUrl, (event) => void handleEvent(event), (connected) => {
+    required("connection-dot").classList.toggle("connected", connected);
   });
+  events.connect();
 
-  // Begin the ambient idle animation while awaiting the first tap (Req 5.3). The
-  // controller also starts idle in its constructor; this is an explicit safeguard.
+  async function handleEvent(event: StoreEvent): Promise<void> {
+    if (["customer_detected", "customer_close"].includes(event.type)) videoQueue.enqueue(event.type);
+    if (event.type === "show_qr") showQr(true);
+    if (event.type === "language_changed" && event.session_id === sessionId) {
+      currentLanguage = String(event.payload.language ?? "en");
+      required("language-label").textContent = currentLanguage.toUpperCase();
+      const locale = speechLocale(currentLanguage);
+      stt.setLanguage(locale);
+      tts.setLanguage(locale);
+    }
+    // The hologram is a shared store display: announce every ready order. The
+    // event session identifies the customer/order, not the display connection.
+    if (event.type === "order_ready") {
+      const orderNumber = Number(event.payload.order_number);
+      const language = String(event.payload.customer_language ?? currentLanguage);
+      const orderId = String(event.payload.id ?? "");
+      if (orderId && announcedOrders.has(orderId)) return;
+      if (orderId) announcedOrders.add(orderId);
+      await announceReady(orderNumber, language);
+    }
+  }
+
+  let readyDismissTimer: ReturnType<typeof window.setTimeout> | null = null;
+  async function announceReady(orderNumber: number, language: string): Promise<void> {
+    const message = (readyCopy[language] ?? readyCopy.en)(orderNumber);
+    required("ready-number").textContent = `#${orderNumber}`;
+    required("ready-message").textContent = message;
+    document.body.classList.add("order-ready");
+    renderer.render("happy", "wave");
+    const voice = new WebSpeechTtsEngine(language === "ko" ? "ko-KR" : language === "ms" ? "ms-MY" : "en-US");
+    try { await voice.speak(message); } catch { /* large visual alert remains */ }
+    if (readyDismissTimer !== null) window.clearTimeout(readyDismissTimer);
+    readyDismissTimer = window.setTimeout(() => {
+      document.body.classList.remove("order-ready");
+      renderer.playIdle();
+      readyDismissTimer = null;
+    }, 10000);
+  }
+
+  required("stage").addEventListener("pointerdown", (event) => {
+    if ((event.target as HTMLElement).closest("button, select, .qr-panel")) return;
+    if (!videoQueue.playing) controller.onTap();
+  });
+  required("qr-panel").addEventListener("click", () => showQr(true));
+  required("qr-close").addEventListener("click", () => showQr(false));
+  required("mode-toggle").addEventListener("click", () => {
+    const next = document.body.dataset.display === "hologram" ? "tablet" : "hologram";
+    document.body.dataset.display = next;
+    required("mode-toggle").textContent = next === "hologram" ? "Tablet Mode" : "Hologram Mode";
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-debug-event]").forEach((button) => {
+    button.addEventListener("click", () => events.send(button.dataset.debugEvent ?? "", { distance: Number(button.dataset.distance || 0) }));
+  });
+  required("debug-ready").addEventListener("click", () => void announceReady(12, currentLanguage));
+  required("debug-ko").addEventListener("click", () => { currentLanguage = "ko"; required("language-label").textContent = "KO"; });
+  required("debug-en").addEventListener("click", () => { currentLanguage = "en"; required("language-label").textContent = "EN"; });
+  required("debug-ms").addEventListener("click", () => { currentLanguage = "ms"; required("language-label").textContent = "MS"; });
+  const recoverReadyOrder = async () => {
+    try {
+      const readyOrders = await getReadyOrders(STORE_ID);
+      for (const order of readyOrders.reverse()) {
+        if (announcedOrders.has(order.id)) continue;
+        announcedOrders.add(order.id);
+        await announceReady(order.order_number, order.customer_language || currentLanguage);
+      }
+    } catch { /* WebSocket remains the primary path; retry on the next interval. */ }
+  };
+  window.setInterval(() => void recoverReadyOrder(), 3000);
+  void recoverReadyOrder();
   renderer.playIdle();
-
-  return { controller, chat };
 }
 
-// Auto-start in the browser once the DOM is ready. Guarded so importing this
-// module in a non-DOM test context does not trigger side effects.
-if (typeof document !== "undefined") {
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => startKiosk());
-  } else {
-    startKiosk();
+async function restoreSession(storeId: string): Promise<{ id: string; language: string; order_id?: string | null }> {
+  const key = `vertew-session-${storeId}`;
+  // sessionStorage survives a page refresh (so READY events still match) but a
+  // newly opened kiosk session starts clean for the next customer. Migrate the
+  // earlier localStorage value once so an order already in progress is not lost.
+  const existing = window.sessionStorage.getItem(key) ?? window.localStorage.getItem(key);
+  if (existing) {
+    try {
+      const session = await getCustomerSession(existing);
+      window.sessionStorage.setItem(key, existing);
+      window.localStorage.removeItem(key);
+      return session;
+    }
+    catch { window.sessionStorage.removeItem(key); window.localStorage.removeItem(key); }
   }
+  return createCustomerSession(storeId);
+}
+
+async function renderQr(value: string): Promise<void> {
+  const dataUrl = await QRCode.toDataURL(value, { width: 420, margin: 2, color: { dark: "#05060aff", light: "#ffffffff" } });
+  document.querySelectorAll<HTMLImageElement>(".session-qr").forEach((image) => { image.src = dataUrl; });
+}
+
+function showQr(show: boolean): void { document.body.classList.toggle("qr-expanded", show); }
+function speechLocale(language: string): string {
+  return language === "ko" ? "ko-KR" : language === "ms" ? "ms-MY" : "en-US";
+}
+function buildStoreWsUrl(sessionId: string, client: string): string {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/ws/store/${STORE_ID}?client=${client}&session_id=${sessionId}`;
+}
+function required<T extends HTMLElement = HTMLElement>(id: string): T {
+  const element = document.getElementById(id);
+  if (!element) throw new Error(`Missing #${id}`);
+  return element as T;
+}
+
+if (typeof document !== "undefined") {
+  const boot = () => void startKiosk().catch((error) => {
+    document.body.dataset.state = "error";
+    const banner = document.getElementById("boot-error");
+    if (banner) { banner.textContent = error instanceof Error ? error.message : "Hologram failed to start"; banner.classList.add("visible"); }
+  });
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
 }

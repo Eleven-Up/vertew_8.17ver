@@ -103,6 +103,7 @@ chromium_flags() {
 --fast
 --fast-start
 --disable-component-update
+--autoplay-policy=no-user-gesture-required
 FLAGS
 }
 

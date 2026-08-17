@@ -85,6 +85,8 @@ async def handle_transcript(
     data_store: DataStore,
     session: ConversationSession,
     llm_client: GeminiClient | None = None,
+    language: str = "en",
+    local_on_unavailable: bool = False,
     now: Callable[[], datetime] = _utcnow,
 ) -> CharacterResponse:
     """Run one Conversation_Turn from transcript to character response.
@@ -127,6 +129,8 @@ async def handle_transcript(
     except GeminiUnavailableError:
         # Network unreachable/error/timeout: abort with no partial output and do
         # not record a turn for the failed call (Req 4.5, 9.5).
+        if local_on_unavailable:
+            return _local_response(transcript, language)
         return llm.FALLBACK_UNAVAILABLE
 
     # Success path: parse -> profanity filter -> persist -> return (Req 4.3).
@@ -143,3 +147,29 @@ async def handle_transcript(
         )
     )
     return safe
+
+
+def _local_response(transcript: str, language: str) -> CharacterResponse:
+    """Useful multilingual demo response when the optional cloud LLM is offline."""
+    text = transcript.lower()
+    prices = {"watermelon": 4, "mango": 5, "banana": 3, "apple": 3.5,
+              "수박": 4, "망고": 5, "바나나": 3, "사과": 3.5,
+              "tembikai": 4, "mangga": 5, "pisang": 3, "epal": 3.5}
+    product = next(((name, price) for name, price in prices.items() if name in text), None)
+    asks_price = any(word in text for word in ("price", "how much", "얼마", "가격", "berapa", "harga"))
+    wants_order = any(word in text for word in ("order", "buy", "take one", "주문", "살게", "주세요", "pesan", "beli"))
+    lang = language if language in {"en", "ko", "ms"} else "en"
+    if product and asks_price:
+        price = product[1]
+        copies = {"en": f"It is RM {price:g}. You can scan the QR code to order!",
+                  "ko": f"가격은 RM {price:g}입니다. QR 코드를 스캔해서 주문해 주세요!",
+                  "ms": f"Harganya RM {price:g}. Imbas kod QR untuk membuat pesanan!"}
+    elif wants_order:
+        copies = {"en": "Great! Please scan the QR code to place your order.",
+                  "ko": "좋아요! QR 코드를 스캔해서 주문해 주세요.",
+                  "ms": "Baik! Sila imbas kod QR untuk membuat pesanan."}
+    else:
+        copies = {"en": "We have fresh watermelon, mango, banana, and apple. What would you like?",
+                  "ko": "신선한 수박, 망고, 바나나, 사과가 있어요. 어떤 과일을 원하세요?",
+                  "ms": "Kami ada tembikai, mangga, pisang dan epal segar. Anda mahu yang mana?"}
+    return CharacterResponse(copies[lang], "happy", "wave" if wants_order else "nod", True)

@@ -100,6 +100,7 @@ export class ChatClient {
 
   /** True between sending a transcript and receiving (or failing) its response. */
   private turnInFlight = false;
+  private pendingTranscript: string | null = null;
 
   constructor(options: ChatClientOptions) {
     this.url = options.url;
@@ -138,6 +139,7 @@ export class ChatClient {
     }
 
     socket.onmessage = (ev) => this.handleMessage(ev.data);
+    socket.onopen = () => this.flushPending();
     socket.onerror = () => this.handleConnectionDrop();
     socket.onclose = () => this.handleConnectionDrop();
 
@@ -153,8 +155,10 @@ export class ChatClient {
     this.connect();
     const socket = this.socket;
     if (socket === null || socket.readyState !== WS_OPEN) {
-      // No live connection to the local server -> surface a network error.
-      this.failTurn();
+      // The first utterance often arrives while the socket is still connecting.
+      // Keep one in-flight transcript and send it as soon as onopen fires.
+      this.turnInFlight = true;
+      this.pendingTranscript = transcript;
       return;
     }
     this.turnInFlight = true;
@@ -176,6 +180,7 @@ export class ChatClient {
       this.socket = null;
     }
     this.turnInFlight = false;
+    this.pendingTranscript = null;
   }
 
   // -------------------------------------------------------------------------
@@ -196,6 +201,18 @@ export class ChatClient {
     this.responseHandler?.(response);
   }
 
+  private flushPending(): void {
+    const transcript = this.pendingTranscript;
+    const socket = this.socket;
+    if (!transcript || !socket || socket.readyState !== WS_OPEN) return;
+    this.pendingTranscript = null;
+    try {
+      socket.send(JSON.stringify({ transcript }));
+    } catch {
+      this.failTurn();
+    }
+  }
+
   private handleConnectionDrop(): void {
     this.socket = null;
     // Only surface an error if a turn was awaiting a response; an idle close is
@@ -207,6 +224,7 @@ export class ChatClient {
 
   private failTurn(): void {
     this.turnInFlight = false;
+    this.pendingTranscript = null;
     this.networkErrorHandler?.();
   }
 }

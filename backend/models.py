@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 
 # ---------------------------------------------------------------------------
 # Allowed value sets (single source of truth, mirrored to the renderer).
@@ -59,6 +60,68 @@ class ConversationTurn:
     customer_text: str
     character_text: str
     completed_at: datetime
+
+
+class LanguageSource(StrEnum):
+    DEFAULT = "default"
+    AUTO_DETECTED = "auto_detected"
+    USER_SELECTED = "user_selected"
+
+
+class OrderStatus(StrEnum):
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    PREPARING = "PREPARING"
+    READY = "READY"
+    COMPLETED = "COMPLETED"
+    REJECTED = "REJECTED"
+
+
+@dataclass(frozen=True)
+class Product:
+    id: str
+    store_id: str
+    name: dict[str, str]
+    description: dict[str, str]
+    price_minor: int
+    currency: str
+    available: bool
+    image: str
+
+
+@dataclass(frozen=True)
+class CustomerSession:
+    id: str
+    store_id: str
+    language: str
+    language_source: LanguageSource
+    order_id: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class OrderItem:
+    product_id: str
+    quantity: int
+    product_name: dict[str, str]
+    unit_price_minor: int
+
+
+@dataclass(frozen=True)
+class Order:
+    id: str
+    store_id: str
+    session_id: str
+    order_number: int
+    status: OrderStatus
+    customer_language: str
+    order_source: str
+    total_minor: int
+    currency: str
+    items: tuple[OrderItem, ...]
+    created_at: datetime
+    updated_at: datetime
 
 
 def normalize_emotion(emotion: str | None) -> str:
