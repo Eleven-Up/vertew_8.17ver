@@ -200,6 +200,17 @@ FACTCHAT_MODEL_ENV: str = "FACTCHAT_MODEL"
 DEFAULT_FACTCHAT_BASE_URL: str = "https://factchat-cloud.mindlogic.ai/v1/gateway"
 DEFAULT_FACTCHAT_MODEL: str = "solar-pro3"
 
+# Local, fully-offline provider. Any OpenAI-compatible local server works — Ollama
+# (`ollama serve`, base URL http://localhost:11434/v1) or llama.cpp's llama-server
+# (http://localhost:8080/v1). No cloud, no API key required by default; the model
+# runs on the device (e.g. a small quantized multilingual model on a Raspberry Pi).
+# All values are overridable via environment so the same build runs cloud or local.
+LOCAL_BASE_URL_ENV: str = "LOCAL_LLM_BASE_URL"
+LOCAL_MODEL_ENV: str = "LOCAL_LLM_MODEL"
+LOCAL_API_KEY_ENV: str = "LOCAL_LLM_API_KEY"
+DEFAULT_LOCAL_BASE_URL: str = "http://localhost:11434/v1"
+DEFAULT_LOCAL_MODEL: str = "qwen2.5:1.5b-instruct"
+
 
 class GeminiUnavailableError(RuntimeError):
     """Raised when every Gemini Flash attempt fails or times out.
@@ -289,24 +300,32 @@ class OpenAICompatibleClient:
         api_key: str | None = None,
         model: str | None = None,
         base_url: str | None = None,
+        *,
+        require_api_key: bool = True,
+        path: str = "/chat/completions/",
+        api_key_env: str = FACTCHAT_API_KEY_ENV,
     ) -> None:
         self._api_key = (
-            api_key if api_key is not None else os.environ.get(FACTCHAT_API_KEY_ENV)
+            api_key if api_key is not None else os.environ.get(api_key_env)
         )
+        self._api_key_env = api_key_env
         self._model = model or os.environ.get(FACTCHAT_MODEL_ENV) or DEFAULT_FACTCHAT_MODEL
         self._base_url = (
             base_url
             or os.environ.get(FACTCHAT_BASE_URL_ENV)
             or DEFAULT_FACTCHAT_BASE_URL
         ).rstrip("/")
+        # A local server (Ollama / llama.cpp) needs no auth; a cloud gateway does.
+        self._require_api_key = require_api_key
+        self._path = path if path.startswith("/") else f"/{path}"
         # Reused across calls so subsequent requests skip the TLS/connection setup
         # cost; created lazily on first use inside the event loop.
         self._http = None  # type: ignore[var-annotated]
 
     async def generate(self, prompt: str) -> RawResponse:
         """Issue one chat-completion request and return the assistant message text."""
-        if not self._api_key:
-            raise GeminiUnavailableError(f"{FACTCHAT_API_KEY_ENV} is not configured")
+        if self._require_api_key and not self._api_key:
+            raise GeminiUnavailableError(f"{self._api_key_env} is not configured")
 
         # Lazy import keeps httpx optional for pure-parsing imports.
         import httpx  # type: ignore[import-not-found]
@@ -315,11 +334,11 @@ class OpenAICompatibleClient:
             # Keep-alive connection pool reused for the process lifetime.
             self._http = httpx.AsyncClient(timeout=GEMINI_TIMEOUT_SECONDS + 5)
 
-        url = f"{self._base_url}/chat/completions/"
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
+        url = f"{self._base_url}{self._path}"
+        headers = {"Content-Type": "application/json"}
+        # Send bearer auth only when a key is present (local servers need none).
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
         payload = {
             "model": self._model,
             "messages": [{"role": "user", "content": prompt}],
@@ -347,16 +366,37 @@ def _get_default_client() -> GeminiClient:
     """
     global _default_client
     if _default_client is None:
-        provider = (
-            os.environ.get(LLM_PROVIDER_ENV) or DEFAULT_LLM_PROVIDER
-        ).strip().lower()
-        if provider == "factchat":
-            logger.info("LLM provider: factchat (CNU API Gateway)")
-            _default_client = OpenAICompatibleClient()
-        else:
-            logger.info("LLM provider: gemini (google-genai)")
-            _default_client = GeminiFlashClient()
+        _default_client = build_client_for_provider(
+            (os.environ.get(LLM_PROVIDER_ENV) or DEFAULT_LLM_PROVIDER).strip().lower()
+        )
     return _default_client
+
+
+def build_client_for_provider(provider: str) -> GeminiClient:
+    """Construct the LLM client for a provider name (pure factory, no caching).
+
+    - ``factchat``: OpenAI-compatible CNU API Gateway (cloud, requires a key).
+    - ``local``: OpenAI-compatible local server — Ollama or llama.cpp's
+      llama-server — for a fully-offline, on-device model. No API key required.
+    - anything else (default): Google Gemini directly.
+    """
+    if provider == "factchat":
+        logger.info("LLM provider: factchat (CNU API Gateway)")
+        return OpenAICompatibleClient()
+    if provider == "local":
+        base_url = os.environ.get(LOCAL_BASE_URL_ENV) or DEFAULT_LOCAL_BASE_URL
+        model = os.environ.get(LOCAL_MODEL_ENV) or DEFAULT_LOCAL_MODEL
+        logger.info("LLM provider: local OpenAI-compatible (%s, model=%s)", base_url, model)
+        return OpenAICompatibleClient(
+            api_key=os.environ.get(LOCAL_API_KEY_ENV),
+            model=model,
+            base_url=base_url,
+            require_api_key=False,
+            path="/chat/completions",
+            api_key_env=LOCAL_API_KEY_ENV,
+        )
+    logger.info("LLM provider: gemini (google-genai)")
+    return GeminiFlashClient()
 
 
 async def complete(prompt: str, client: GeminiClient | None = None) -> RawResponse:

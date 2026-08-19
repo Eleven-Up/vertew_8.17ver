@@ -27,3 +27,11 @@ nav button { padding: 10px 15px; border-radius: 9px; color: #929bad; background:
 .empty { min-height: 300px; display: flex; flex-direction: column; place-content: center; align-items: center; justify-content: center; gap: 16px; color: #858e9f; text-align: center; }.loader { width: 42px; height: 42px; border: 4px solid #28303a; border-top-color: #67efff; border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }@keyframes new-pulse { 50% { border-color: #ff5797; box-shadow: 0 0 28px rgba(255,64,137,.2); } }@keyframes toast-in { from { opacity: 0; transform: translate(-50%,-20px); } }
 @media (max-width: 620px) { .dashboard { padding: 16px; }.stats { gap: 7px; }.stats div { display: block; padding: 13px; }.stats span { display: block; font-size: 9px; }.stats strong { font-size: 26px; }.connection { font-size: 9px; } }
+.calls { display: grid; gap: 10px; margin-bottom: 22px; }
+.call-card { display: flex; align-items: center; gap: 14px; padding: 15px 18px; border: 2px solid #ffb84c; border-radius: 16px; background: linear-gradient(150deg, #2a2013, #1a140b); box-shadow: 0 0 34px rgba(255,184,76,.22); animation: call-pulse 1.5s ease-in-out infinite; }
+.call-icon { font-size: 26px; }
+.call-body { flex: 1; min-width: 0; }
+.call-body b { color: #ffd489; letter-spacing: .02em; }
+.call-body small { display: block; margin-top: 3px; color: #d9c19a; overflow-wrap: anywhere; }
+.call-card button { min-height: 44px; padding: 10px 16px; border-radius: 12px; color: #201603; background: linear-gradient(135deg, #ffd06a, #ffb84c); font-weight: 1000; white-space: nowrap; }
+@keyframes call-pulse { 50% { border-color: #ffd489; box-shadow: 0 0 44px rgba(255,184,76,.4); } }

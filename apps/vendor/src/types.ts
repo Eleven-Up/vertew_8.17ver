@@ -28,3 +28,19 @@ export interface StoreEvent {
   timestamp: string;
   payload: unknown;
 }
+
+// Payload of a "call_vendor" event: the assistant escalated a customer question
+// it could not answer (or a safety-sensitive one) to the human vendor.
+export interface CallVendorPayload {
+  question: string;
+  language: string;
+}
+
+// A pending "please come help" call shown on the dashboard until dismissed.
+export interface VendorCall {
+  id: string;
+  question: string;
+  language: string;
+  at: string;
+  sessionId: string | null;
+}

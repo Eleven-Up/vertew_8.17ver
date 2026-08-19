@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { changeOrderStatus, getOrders } from "./api";
-import type { Order, OrderStatus, StoreEvent } from "./types";
+import type { CallVendorPayload, Order, OrderStatus, StoreEvent, VendorCall } from "./types";
 
 const storeId = new URLSearchParams(window.location.search).get("store") ?? "demo";
 const eventTypes = new Set(["new_order", "order_accepted", "order_rejected", "order_preparing", "order_ready", "order_completed"]);
@@ -37,9 +37,13 @@ export function App() {
   const [error, setError] = useState("");
   const [connected, setConnected] = useState(false);
   const [toast, setToast] = useState<Order | null>(null);
+  const [calls, setCalls] = useState<VendorCall[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [updating, setUpdating] = useState<string | null>(null);
   const reconnectTimer = useRef<number | null>(null);
+  const callSeq = useRef(0);
+
+  const dismissCall = (id: string) => setCalls((current) => current.filter((call) => call.id !== id));
 
   const active = useMemo(() => orders.filter((order) => !["COMPLETED", "REJECTED"].includes(order.status)), [orders]);
   const history = useMemo(() => orders.filter((order) => ["COMPLETED", "REJECTED"].includes(order.status)), [orders]);
@@ -55,6 +59,19 @@ export function App() {
       socket.onopen = () => setConnected(true);
       socket.onmessage = (message) => {
         const event = JSON.parse(String(message.data)) as StoreEvent;
+        if (event.type === "call_vendor") {
+          const payload = event.payload as CallVendorPayload;
+          const call: VendorCall = {
+            id: `${event.timestamp}-${callSeq.current++}`,
+            question: payload?.question ?? "",
+            language: payload?.language ?? "",
+            at: event.timestamp,
+            sessionId: event.session_id,
+          };
+          setCalls((current) => [call, ...current]);
+          playNotification();
+          return;
+        }
         if (!eventTypes.has(event.type)) return;
         const order = event.payload as Order;
         setOrders((current) => upsert(current, order));
@@ -95,6 +112,17 @@ export function App() {
 
     {toast && <div className="toast"><span>🔔</span><div><b>New Order #{toast.order_number}</b><small>{summary(toast)}</small></div></div>}
     {error && <div className="error" role="alert">{error}<button onClick={() => void load()}>Retry</button></div>}
+
+    {calls.length > 0 && <section className="calls" role="alert" aria-live="assertive">
+      {calls.map((call) => <div className="call-card" key={call.id}>
+        <span className="call-icon">🙋</span>
+        <div className="call-body">
+          <b>Customer needs you</b>
+          <small>{call.question ? `“${call.question}”` : "A customer asked to speak with you."} · {languageNames[call.language] ?? call.language}</small>
+        </div>
+        <button onClick={() => dismissCall(call.id)}>Handled</button>
+      </div>)}
+    </section>}
 
     <section className="stats">
       <div><span>NEW</span><strong>{counts.pending}</strong></div>

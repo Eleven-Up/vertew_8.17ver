@@ -357,6 +357,87 @@ class DataStore:
             )
         return cursor.rowcount > 0
 
+    def archive_qa(self, qa_id: str) -> bool:
+        """Archive (reject) a QA entry so it is neither used nor listed as pending.
+        Returns ``True`` when a row was updated, ``False`` when no such id exists."""
+        now = _to_iso(datetime.now(timezone.utc))
+        with self._conn:
+            cursor = self._conn.execute(
+                "UPDATE qa_entries SET status = 'archived', updated_at = ? WHERE id = ?",
+                (now, qa_id),
+            )
+        return cursor.rowcount > 0
+
+    def get_qa_entry(self, qa_id: str) -> QAEntry | None:
+        """Return a single QA entry by id, or ``None`` when it does not exist."""
+        row = self._conn.execute(
+            "SELECT * FROM qa_entries WHERE id = ?", (qa_id,)
+        ).fetchone()
+        return self._qa_from_row(row) if row else None
+
+    def update_qa(
+        self,
+        qa_id: str,
+        *,
+        question: str | None = None,
+        answer: dict[str, str] | None = None,
+    ) -> bool:
+        """Update a QA entry's question and/or per-language answer. Returns ``True``
+        when a row was updated."""
+        assignments: list[str] = []
+        params: list[object] = []
+        if question is not None:
+            assignments.append("question = ?")
+            params.append(question)
+        if answer is not None:
+            assignments.append("answer_json = ?")
+            params.append(json.dumps(answer, ensure_ascii=False))
+        if not assignments:
+            return False
+        assignments.append("updated_at = ?")
+        params.append(_to_iso(datetime.now(timezone.utc)))
+        params.append(qa_id)
+        with self._conn:
+            cursor = self._conn.execute(
+                f"UPDATE qa_entries SET {', '.join(assignments)} WHERE id = ?",
+                params,
+            )
+        return cursor.rowcount > 0
+
+    def update_product(
+        self,
+        store_id: str,
+        product_id: str,
+        *,
+        spice_level: int,
+        ingredients: dict[str, str],
+        allergens: tuple[str, ...],
+        available: bool,
+    ) -> Product | None:
+        """Update a product's structured menu-knowledge fields (spice level,
+        ingredients, allergens) and availability. Returns the updated
+        :class:`Product`, or ``None`` when the product does not exist."""
+        with self._conn:
+            cursor = self._conn.execute(
+                "UPDATE products SET spice_level = ?, ingredients_json = ?, "
+                "allergens_json = ?, available = ? WHERE store_id = ? AND id = ?",
+                (
+                    max(0, min(3, spice_level)),
+                    json.dumps(ingredients, ensure_ascii=False),
+                    json.dumps(list(allergens), ensure_ascii=False),
+                    1 if available else 0,
+                    store_id,
+                    product_id,
+                ),
+            )
+        if cursor.rowcount == 0:
+            return None
+        row = self._conn.execute(
+            "SELECT * FROM products WHERE store_id = ? AND id = ?",
+            (store_id, product_id),
+        ).fetchone()
+        return self._product_from_row(row) if row else None
+
     def get_session(self, session_id: str) -> CustomerSession | None:
         row = self._conn.execute(
             "SELECT * FROM customer_sessions WHERE id = ?", (session_id,)

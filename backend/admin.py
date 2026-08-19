@@ -23,7 +23,7 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass
 
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse
 
 from db import DataStore, StorageError
@@ -254,6 +254,7 @@ def _render_admin_page(view: _AdminView) -> str:
     </style>
   </head>
   <body>
+    {_ADMIN_NAV}
     <main id="admin">
       <h1>Store &amp; product information</h1>
       {banner}
@@ -341,3 +342,247 @@ def post_admin(
     view = _view_from_store(result.store_info)
     view.confirmation = "Store and product information saved."
     return HTMLResponse(content=_render_admin_page(view))
+
+
+# ---------------------------------------------------------------------------
+# Product editing + Q&A review pages (server-rendered, no client bundle).
+#
+# These extend the Admin_Interface so the vendor can (a) set the structured
+# menu-knowledge fields that ground answers — spice level, ingredients, allergens
+# — per product, and (b) review the pending Q&A entries the learning loop captured,
+# approving (optionally editing) or rejecting each. Single-store MVP: routes accept
+# a ``store_id`` query param defaulting to the demo store.
+# ---------------------------------------------------------------------------
+
+LANGS = ("en", "ko", "ms")
+DEFAULT_STORE_ID = "demo"
+SPICE_LABELS = {0: "0 - not spicy", 1: "1 - mild", 2: "2 - medium", 3: "3 - hot"}
+
+_ADMIN_NAV = (
+    '<nav><a href="/admin">Store info</a> '
+    '<a href="/admin/products">Products</a> '
+    '<a href="/admin/qa">Q&amp;A review</a></nav>'
+)
+
+_ADMIN_STYLE = """
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 52rem; margin: 2rem auto; padding: 0 1rem; }
+  nav a { margin-right: 1rem; }
+  h1 { margin-bottom: .25rem; }
+  .card { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  label { display: block; margin: .6rem 0 .2rem; font-weight: 600; }
+  input, textarea, select { width: 100%; box-sizing: border-box; padding: .4rem; font: inherit; }
+  textarea { min-height: 3rem; }
+  .rowfields { display: flex; gap: .75rem; flex-wrap: wrap; }
+  .rowfields > div { flex: 1; min-width: 8rem; }
+  label.inline, input.inline { display: inline; width: auto; }
+  .confirmation { color: #1e7e34; font-weight: 600; }
+  .error { color: #c0392b; font-weight: 600; }
+  .muted { color: #666; font-size: .9rem; }
+  button { margin-top: .6rem; padding: .5rem 1rem; font: inherit; }
+  .q { font-weight: 600; }
+</style>
+"""
+
+
+def _banner(confirmation: str | None = None, error: str | None = None) -> str:
+    if confirmation is not None:
+        return f'<p id="confirmation" role="status" class="confirmation">{html.escape(confirmation)}</p>'
+    if error is not None:
+        return f'<p id="error" role="alert" class="error">{html.escape(error)}</p>'
+    return ""
+
+
+def _page(title: str, body: str, banner: str = "") -> str:
+    return (
+        "<!doctype html>\n"
+        '<html lang="en"><head><meta charset="utf-8"/>'
+        '<meta name="viewport" content="width=device-width, initial-scale=1"/>'
+        f"<title>{html.escape(title)}</title>{_ADMIN_STYLE}</head>"
+        f"<body>{_ADMIN_NAV}<main>{banner}{body}</main></body></html>"
+    )
+
+
+def _render_products_page(store: DataStore, store_id: str, banner: str = "") -> str:
+    products = store.list_products(store_id)
+    cards: list[str] = []
+    if not products:
+        cards.append("<p class='muted'>No products found for this store.</p>")
+    for product in products:
+        name = html.escape(product.name.get("en") or product.id)
+        price = f"{product.currency} {product.price_minor / 100:.2f}"
+        spice_opts = "".join(
+            f'<option value="{level}"{" selected" if product.spice_level == level else ""}>'
+            f"{html.escape(label)}</option>"
+            for level, label in SPICE_LABELS.items()
+        )
+        ingredient_inputs = "".join(
+            f"<div><label>Ingredients ({lang})</label>"
+            f'<input name="ing_{lang}" maxlength="500" '
+            f'value="{html.escape(product.ingredients.get(lang, ""))}"/></div>'
+            for lang in LANGS
+        )
+        allergens = html.escape(", ".join(product.allergens))
+        checked = " checked" if product.available else ""
+        action = f"/admin/products/{html.escape(product.id)}?store_id={html.escape(store_id)}"
+        cards.append(
+            f'<form class="card" method="post" action="{action}">'
+            f'<h3>{name} <span class="muted">- {price} - id={html.escape(product.id)}</span></h3>'
+            f"<label>Spice level</label><select name=\"spice_level\">{spice_opts}</select>"
+            f'<div class="rowfields">{ingredient_inputs}</div>'
+            f"<label>Allergens (comma-separated, e.g. nuts, dairy)</label>"
+            f'<input name="allergens" maxlength="300" value="{allergens}"/>'
+            f'<label class="inline"><input class="inline" type="checkbox" name="available"{checked}/> Available</label>'
+            f'<br/><button type="submit">Save "{name}"</button>'
+            "</form>"
+        )
+    body = (
+        "<h1>Products</h1>"
+        "<p class='muted'>These fields ground the assistant's answers about "
+        "ingredients, spice, and allergens.</p>" + "".join(cards)
+    )
+    return _page("Vertew Admin - Products", body, banner)
+
+
+def _render_qa_page(store: DataStore, store_id: str, banner: str = "") -> str:
+    pending = store.list_qa(store_id, status="pending")
+    approved = store.list_qa(store_id, status="approved")
+
+    pending_cards: list[str] = []
+    if not pending:
+        pending_cards.append(
+            "<p class='muted'>No pending questions. Answers the assistant generates "
+            "for uncovered questions will appear here for review.</p>"
+        )
+    for entry in pending:
+        answer_inputs = "".join(
+            f"<div><label>Answer ({lang})</label>"
+            f'<textarea name="answer_{lang}">{html.escape(entry.answer.get(lang, ""))}</textarea></div>'
+            for lang in LANGS
+        )
+        approve_action = f"/admin/qa/{html.escape(entry.id)}/approve?store_id={html.escape(store_id)}"
+        reject_action = f"/admin/qa/{html.escape(entry.id)}/reject?store_id={html.escape(store_id)}"
+        pending_cards.append(
+            '<div class="card">'
+            f'<p class="muted">source: {html.escape(entry.source)} - id={html.escape(entry.id)}</p>'
+            f'<form method="post" action="{approve_action}">'
+            f'<label>Question</label><input name="question" maxlength="500" value="{html.escape(entry.question)}"/>'
+            f'<div class="rowfields">{answer_inputs}</div>'
+            '<button type="submit">Approve</button></form>'
+            f'<form method="post" action="{reject_action}"><button type="submit">Reject</button></form>'
+            "</div>"
+        )
+
+    approved_items = "".join(
+        f'<li><span class="q">{html.escape(entry.question)}</span> - '
+        f'{html.escape(entry.answer.get("en") or next(iter(entry.answer.values()), ""))}</li>'
+        for entry in approved
+    )
+    body = (
+        "<h1>Q&amp;A review</h1>"
+        "<h2>Pending</h2>" + "".join(pending_cards)
+        + "<h2>Approved</h2><ul>"
+        + (approved_items or "<li class='muted'>none</li>")
+        + "</ul>"
+    )
+    return _page("Vertew Admin - Q&A", body, banner)
+
+
+def _parse_allergens(raw: str) -> tuple[str, ...]:
+    """Split a comma-separated allergen field into a normalized tuple of tags."""
+    return tuple(part.strip().lower() for part in raw.split(",") if part.strip())
+
+
+def _collect_langs(values: dict[str, str]) -> dict[str, str]:
+    """Keep only non-empty, trimmed per-language strings."""
+    return {lang: text.strip() for lang, text in values.items() if text.strip()}
+
+
+@router.get("/admin/products", response_class=HTMLResponse)
+def get_admin_products(
+    store_id: str = DEFAULT_STORE_ID, store: DataStore = Depends(get_data_store)
+) -> HTMLResponse:
+    """List the store's products with editable spice/ingredients/allergens fields."""
+    return HTMLResponse(content=_render_products_page(store, store_id))
+
+
+@router.post("/admin/products/{product_id}", response_class=HTMLResponse)
+def post_admin_product(
+    product_id: str,
+    store_id: str = DEFAULT_STORE_ID,
+    spice_level: str = Form(default="0"),
+    ing_en: str = Form(default=""),
+    ing_ko: str = Form(default=""),
+    ing_ms: str = Form(default=""),
+    allergens: str = Form(default=""),
+    available: str | None = Form(default=None),
+    store: DataStore = Depends(get_data_store),
+) -> HTMLResponse:
+    """Update one product's menu-knowledge fields and availability (Req 7.6:
+    the Conversation_Server reads the updated catalog at turn time)."""
+    try:
+        level = int(spice_level)
+    except (TypeError, ValueError):
+        level = 0
+    ingredients = _collect_langs({"en": ing_en, "ko": ing_ko, "ms": ing_ms})
+    updated = store.update_product(
+        store_id,
+        product_id,
+        spice_level=level,
+        ingredients=ingredients,
+        allergens=_parse_allergens(allergens),
+        available=available is not None,
+    )
+    if updated is None:
+        raise HTTPException(404, "Product not found")
+    name = updated.name.get("en") or updated.id
+    banner = _banner(confirmation=f'Saved "{name}".')
+    return HTMLResponse(content=_render_products_page(store, store_id, banner))
+
+
+@router.get("/admin/qa", response_class=HTMLResponse)
+def get_admin_qa(
+    store_id: str = DEFAULT_STORE_ID, store: DataStore = Depends(get_data_store)
+) -> HTMLResponse:
+    """Review pending Q&A (learned/generated) and see the approved knowledge base."""
+    return HTMLResponse(content=_render_qa_page(store, store_id))
+
+
+@router.post("/admin/qa/{qa_id}/approve", response_class=HTMLResponse)
+def post_admin_qa_approve(
+    qa_id: str,
+    store_id: str = DEFAULT_STORE_ID,
+    question: str = Form(default=""),
+    answer_en: str = Form(default=""),
+    answer_ko: str = Form(default=""),
+    answer_ms: str = Form(default=""),
+    store: DataStore = Depends(get_data_store),
+) -> HTMLResponse:
+    """Approve a pending Q&A entry (optionally editing its question/answer first) so
+    it grounds future answers."""
+    entry = store.get_qa_entry(qa_id)
+    if entry is None:
+        raise HTTPException(404, "Q&A entry not found")
+    answer = _collect_langs({"en": answer_en, "ko": answer_ko, "ms": answer_ms})
+    if not answer:
+        banner = _banner(error="An answer in at least one language is required to approve.")
+        return HTMLResponse(content=_render_qa_page(store, store_id, banner), status_code=400)
+    store.update_qa(qa_id, question=(question.strip() or entry.question), answer=answer)
+    store.approve_qa(qa_id)
+    banner = _banner(confirmation="Approved and added to the knowledge base.")
+    return HTMLResponse(content=_render_qa_page(store, store_id, banner))
+
+
+@router.post("/admin/qa/{qa_id}/reject", response_class=HTMLResponse)
+def post_admin_qa_reject(
+    qa_id: str,
+    store_id: str = DEFAULT_STORE_ID,
+    store: DataStore = Depends(get_data_store),
+) -> HTMLResponse:
+    """Reject (archive) a pending Q&A entry so it is not used or shown again."""
+    entry = store.get_qa_entry(qa_id)
+    if entry is None:
+        raise HTTPException(404, "Q&A entry not found")
+    store.archive_qa(qa_id)
+    banner = _banner(confirmation="Rejected.")
+    return HTMLResponse(content=_render_qa_page(store, store_id, banner))

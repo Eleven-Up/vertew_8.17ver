@@ -37,6 +37,7 @@ from typing import Callable
 import llm
 import profanity
 import prompt_builder
+import retrieval
 from db import DataStore
 from llm import GeminiClient, GeminiUnavailableError
 from models import CharacterResponse, ConversationTurn, Product, StoreInfo
@@ -124,6 +125,10 @@ async def handle_transcript(
     # the behavior is unchanged.
     products = data_store.list_products(store_id) if store_id else []
     qa_entries = data_store.list_qa(store_id) if store_id else []
+    # Retrieve only the most relevant curated answers so the prompt stays focused as
+    # the Q&A table grows (top-k; a no-op ordering for small tables).
+    if qa_entries:
+        qa_entries = retrieval.select_relevant_qa(transcript, qa_entries)
     # Curated Q&A first (preferred over generation), then structured menu facts.
     knowledge_blocks = [
         prompt_builder.format_qa_knowledge(qa_entries, language),
