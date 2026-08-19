@@ -205,8 +205,23 @@ async def conversation_ws(websocket: WebSocket) -> None:
                 data_store=data_store,
                 session=session,
                 language=customer_session.language if customer_session else "en",
+                store_id=customer_session.store_id if customer_session else "demo",
                 local_on_unavailable=True,
             )
+            # Human escalation: the assistant asked to fetch the vendor (question not
+            # covered by curated Q&A / menu, or a safety-sensitive allergy/health
+            # question). Notify the vendor dashboard over the store event bus; the
+            # customer still gets the "I'll call the owner" reply.
+            if getattr(response, "action", "answer") == "call_owner":
+                await manager.broadcast(
+                    customer_session.store_id if customer_session else "demo",
+                    "call_vendor",
+                    {
+                        "question": transcript,
+                        "language": customer_session.language if customer_session else "en",
+                    },
+                    session_id=session_id,
+                )
             await websocket.send_json(_response_payload(response))
     except WebSocketDisconnect:
         # Client closed the socket; nothing to clean up beyond the connection.

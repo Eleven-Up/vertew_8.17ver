@@ -137,11 +137,20 @@ def parse(raw: RawResponse) -> CharacterResponse:
     ):
         return FALLBACK_UNDERSTAND
 
+    # Optional orchestration fields (Q&A grounding + human escalation). Unknown or
+    # missing values fall back to the safe defaults ("answer" / no match).
+    raw_action = data.get("action")
+    action = raw_action if raw_action in {"answer", "call_owner"} else "answer"
+    raw_matched = data.get("matched_qa_id")
+    matched_qa_id = raw_matched if _is_non_empty_str(raw_matched) else None
+
     return CharacterResponse(
         text=text[:MAX_TEXT_LENGTH],
         emotion=normalize_emotion(emotion),
         gesture=normalize_gesture(gesture),
         is_fallback=False,
+        action=action,
+        matched_qa_id=matched_qa_id,
     )
 
 

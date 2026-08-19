@@ -9,6 +9,12 @@ export interface Product {
   currency: string;
   available: boolean;
   image: string;
+  // Structured menu knowledge used for product Q&A (and available to the UI):
+  // spice_level is a 0..3 heat scale (0 = not spicy), ingredients mirrors
+  // description per language, allergens is a list of canonical english tags.
+  spice_level?: number;
+  ingredients?: Partial<Record<Language, string>>;
+  allergens?: string[];
 }
 
 export interface Session {

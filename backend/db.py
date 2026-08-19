@@ -32,6 +32,7 @@ from models import (
     OrderItem,
     OrderStatus,
     Product,
+    QAEntry,
     StoreInfo,
 )
 
@@ -71,6 +72,9 @@ CREATE TABLE IF NOT EXISTS products (
     currency        TEXT NOT NULL,
     available       INTEGER NOT NULL DEFAULT 1,
     image           TEXT NOT NULL,
+    spice_level     INTEGER NOT NULL DEFAULT 0 CHECK (spice_level BETWEEN 0 AND 3),
+    ingredients_json TEXT NOT NULL DEFAULT '{}',
+    allergens_json  TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (store_id, id),
     FOREIGN KEY (store_id) REFERENCES stores(id)
 );
@@ -122,13 +126,59 @@ CREATE TABLE IF NOT EXISTS media_assets (
     PRIMARY KEY (store_id, event_type),
     FOREIGN KEY (store_id) REFERENCES stores(id)
 );
+
+CREATE TABLE IF NOT EXISTS qa_entries (
+    id           TEXT PRIMARY KEY,
+    store_id     TEXT NOT NULL,
+    question     TEXT NOT NULL,
+    aliases_json TEXT NOT NULL DEFAULT '[]',
+    answer_json  TEXT NOT NULL,
+    category     TEXT NOT NULL DEFAULT 'general',
+    status       TEXT NOT NULL DEFAULT 'approved',
+    source       TEXT NOT NULL DEFAULT 'curated',
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    FOREIGN KEY (store_id) REFERENCES stores(id)
+);
 """
 
+# Demo catalog. Each entry is:
+#   (id, name{lang}, description{lang}, price_minor, image,
+#    spice_level, ingredients{lang}, allergens(tuple))
+# spice_level is 0..3 (0 = not spicy); allergens are canonical lowercase English
+# tags (empty = none declared). These structured fields are what the assistant
+# reads to answer "what is in this?" / "how spicy is it?" questions.
 DEMO_PRODUCTS = (
-    ("watermelon", {"en": "Watermelon", "ko": "수박", "ms": "Tembikai"}, {"en": "Cool and refreshing watermelon", "ko": "시원하고 상쾌한 수박", "ms": "Tembikai yang sejuk dan menyegarkan"}, 400, "/images/watermelon.png"),
-    ("mango", {"en": "Mango", "ko": "망고", "ms": "Mangga"}, {"en": "Sweet and fresh mango", "ko": "달고 신선한 망고", "ms": "Mangga manis dan segar"}, 500, "/images/mango.png"),
-    ("banana", {"en": "Banana", "ko": "바나나", "ms": "Pisang"}, {"en": "Soft and naturally sweet banana", "ko": "부드럽고 자연스럽게 달콤한 바나나", "ms": "Pisang lembut dan manis semula jadi"}, 300, "/images/banana.png"),
-    ("apple", {"en": "Apple", "ko": "사과", "ms": "Epal"}, {"en": "Crisp and juicy apple", "ko": "아삭하고 과즙이 풍부한 사과", "ms": "Epal rangup dan berjus"}, 350, "/images/apple.png"),
+    ("watermelon", {"en": "Watermelon", "ko": "수박", "ms": "Tembikai"}, {"en": "Cool and refreshing watermelon", "ko": "시원하고 상쾌한 수박", "ms": "Tembikai yang sejuk dan menyegarkan"}, 400, "/images/watermelon.png", 0, {"en": "Fresh-cut watermelon, nothing added", "ko": "갓 자른 수박, 첨가물 없음", "ms": "Tembikai potong segar, tanpa tambahan"}, ()),
+    ("mango", {"en": "Mango", "ko": "망고", "ms": "Mangga"}, {"en": "Sweet and fresh mango", "ko": "달고 신선한 망고", "ms": "Mangga manis dan segar"}, 500, "/images/mango.png", 0, {"en": "Fresh mango", "ko": "신선한 망고", "ms": "Mangga segar"}, ()),
+    ("banana", {"en": "Banana", "ko": "바나나", "ms": "Pisang"}, {"en": "Soft and naturally sweet banana", "ko": "부드럽고 자연스럽게 달콤한 바나나", "ms": "Pisang lembut dan manis semula jadi"}, 300, "/images/banana.png", 0, {"en": "Fresh banana", "ko": "신선한 바나나", "ms": "Pisang segar"}, ()),
+    ("apple", {"en": "Apple", "ko": "사과", "ms": "Epal"}, {"en": "Crisp and juicy apple", "ko": "아삭하고 과즙이 풍부한 사과", "ms": "Epal rangup dan berjus"}, 350, "/images/apple.png", 0, {"en": "Fresh-cut apple", "ko": "갓 자른 사과", "ms": "Epal potong segar"}, ()),
+)
+
+# Demo FAQ/Q&A knowledge base. Each entry is (id, question, answer{lang}, category).
+# These are curated answers the assistant prefers over free generation; the vendor
+# edits them and approves learned ones. Values here are placeholders for the demo.
+DEMO_QA = (
+    ("qa_payment", "How can I pay / how do I order?", {
+        "en": "Just scan the QR code with your phone to order and pay — no app needed.",
+        "ko": "휴대폰으로 QR 코드를 스캔하면 주문과 결제가 돼요. 앱 설치는 필요 없어요.",
+        "ms": "Imbas kod QR dengan telefon anda untuk pesan dan bayar — tanpa aplikasi.",
+    }, "payment"),
+    ("qa_hours", "What time are you open?", {
+        "en": "We are here every evening from 6pm until midnight.",
+        "ko": "매일 저녁 6시부터 자정까지 영업해요.",
+        "ms": "Kami buka setiap petang dari jam 6 hingga tengah malam.",
+    }, "hours"),
+    ("qa_halal", "Is the food halal?", {
+        "en": "We sell only fresh-cut fruit with nothing added, so it suits a halal diet.",
+        "ko": "저희는 첨가물 없이 갓 자른 과일만 팔아서 할랄 식단에도 괜찮아요.",
+        "ms": "Kami hanya menjual buah potong segar tanpa tambahan, jadi sesuai untuk diet halal.",
+    }, "diet"),
+    ("qa_location", "Where will you be tomorrow?", {
+        "en": "We move around the night market — check our sign or ask the owner for tomorrow's spot.",
+        "ko": "야시장 안에서 자리를 옮겨요. 내일 위치는 간판을 보시거나 사장님께 여쭤봐 주세요.",
+        "ms": "Kami berpindah di sekitar pasar malam — lihat papan tanda kami atau tanya tuan kedai untuk lokasi esok.",
+    }, "location"),
 )
 
 
@@ -163,7 +213,30 @@ class DataStore:
     def _init_schema(self) -> None:
         """Create the store_info and conversation_turn tables if absent."""
         self._conn.executescript(_SCHEMA)
+        self._migrate_product_menu_columns()
         self._conn.commit()
+
+    def _migrate_product_menu_columns(self) -> None:
+        """Add the structured menu-knowledge columns to a pre-existing products
+        table (spice_level, ingredients_json, allergens_json).
+
+        ``CREATE TABLE IF NOT EXISTS`` leaves an already-created ``products`` table
+        untouched, so a database seeded before these columns existed would be
+        missing them. Each ``ADD COLUMN`` is attempted independently and the
+        "duplicate column name" error is swallowed, making the migration a no-op on
+        an up-to-date schema and safe to run on every startup.
+        """
+        migrations = (
+            "ALTER TABLE products ADD COLUMN spice_level INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE products ADD COLUMN ingredients_json TEXT NOT NULL DEFAULT '{}'",
+            "ALTER TABLE products ADD COLUMN allergens_json TEXT NOT NULL DEFAULT '[]'",
+        )
+        for statement in migrations:
+            try:
+                self._conn.execute(statement)
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
 
     def seed_demo_data(self) -> None:
         now = _to_iso(datetime.now(timezone.utc))
@@ -174,9 +247,38 @@ class DataStore:
             )
             self._conn.executemany(
                 "INSERT OR IGNORE INTO products "
-                "(id, store_id, name_json, description_json, price_minor, currency, available, image) "
-                "VALUES (?, 'demo', ?, ?, ?, 'MYR', 1, ?)",
-                [(product_id, json.dumps(name, ensure_ascii=False), json.dumps(description, ensure_ascii=False), price, image) for product_id, name, description, price, image in DEMO_PRODUCTS],
+                "(id, store_id, name_json, description_json, price_minor, currency, available, image, "
+                "spice_level, ingredients_json, allergens_json) "
+                "VALUES (?, 'demo', ?, ?, ?, 'MYR', 1, ?, ?, ?, ?)",
+                [
+                    (
+                        product_id,
+                        json.dumps(name, ensure_ascii=False),
+                        json.dumps(description, ensure_ascii=False),
+                        price,
+                        image,
+                        spice_level,
+                        json.dumps(ingredients, ensure_ascii=False),
+                        json.dumps(list(allergens), ensure_ascii=False),
+                    )
+                    for product_id, name, description, price, image, spice_level, ingredients, allergens in DEMO_PRODUCTS
+                ],
+            )
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO qa_entries "
+                "(id, store_id, question, aliases_json, answer_json, category, status, source, created_at, updated_at) "
+                "VALUES (?, 'demo', ?, '[]', ?, ?, 'approved', 'curated', ?, ?)",
+                [
+                    (
+                        qa_id,
+                        question,
+                        json.dumps(answer, ensure_ascii=False),
+                        category,
+                        now,
+                        now,
+                    )
+                    for qa_id, question, answer, category in DEMO_QA
+                ],
             )
             self._conn.executemany(
                 "INSERT OR IGNORE INTO media_assets "
@@ -207,6 +309,53 @@ class DataStore:
             "SELECT * FROM products WHERE store_id = ? ORDER BY rowid", (store_id,)
         ).fetchall()
         return [self._product_from_row(row) for row in rows]
+
+    def list_qa(self, store_id: str, status: str | None = "approved") -> list[QAEntry]:
+        """Return QA entries for a store, filtered by ``status`` (``None`` = all)."""
+        if status is None:
+            rows = self._conn.execute(
+                "SELECT * FROM qa_entries WHERE store_id = ? ORDER BY rowid",
+                (store_id,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM qa_entries WHERE store_id = ? AND status = ? ORDER BY rowid",
+                (store_id, status),
+            ).fetchall()
+        return [self._qa_from_row(row) for row in rows]
+
+    def add_pending_qa(
+        self,
+        store_id: str,
+        question: str,
+        answer: dict[str, str],
+        *,
+        source: str = "generated",
+    ) -> QAEntry:
+        """Insert a pending QA entry (generated or owner-provided) for later vendor
+        approval, and return it. Pending entries do not ground answers until
+        approved via :meth:`approve_qa`."""
+        now = _to_iso(datetime.now(timezone.utc))
+        qa_id = f"qa_{uuid.uuid4().hex[:12]}"
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO qa_entries "
+                "(id, store_id, question, aliases_json, answer_json, category, status, source, created_at, updated_at) "
+                "VALUES (?, ?, ?, '[]', ?, 'general', 'pending', ?, ?, ?)",
+                (qa_id, store_id, question, json.dumps(answer, ensure_ascii=False), source, now, now),
+            )
+        return QAEntry(qa_id, store_id, question, answer, "general", "pending", source, ())
+
+    def approve_qa(self, qa_id: str) -> bool:
+        """Approve a pending QA entry so it grounds future answers. Returns ``True``
+        when a row was updated, ``False`` when no such id exists."""
+        now = _to_iso(datetime.now(timezone.utc))
+        with self._conn:
+            cursor = self._conn.execute(
+                "UPDATE qa_entries SET status = 'approved', updated_at = ? WHERE id = ?",
+                (now, qa_id),
+            )
+        return cursor.rowcount > 0
 
     def get_session(self, session_id: str) -> CustomerSession | None:
         row = self._conn.execute(
@@ -333,7 +482,36 @@ class DataStore:
 
     @staticmethod
     def _product_from_row(row: sqlite3.Row) -> Product:
-        return Product(row["id"], row["store_id"], json.loads(row["name_json"]), json.loads(row["description_json"]), row["price_minor"], row["currency"], bool(row["available"]), row["image"])
+        columns = row.keys()
+        spice_level = int(row["spice_level"]) if "spice_level" in columns else 0
+        ingredients = json.loads(row["ingredients_json"]) if "ingredients_json" in columns else {}
+        allergens = tuple(json.loads(row["allergens_json"])) if "allergens_json" in columns else ()
+        return Product(
+            row["id"],
+            row["store_id"],
+            json.loads(row["name_json"]),
+            json.loads(row["description_json"]),
+            row["price_minor"],
+            row["currency"],
+            bool(row["available"]),
+            row["image"],
+            spice_level=spice_level,
+            ingredients=ingredients,
+            allergens=allergens,
+        )
+
+    @staticmethod
+    def _qa_from_row(row: sqlite3.Row) -> QAEntry:
+        return QAEntry(
+            row["id"],
+            row["store_id"],
+            row["question"],
+            json.loads(row["answer_json"]),
+            row["category"],
+            row["status"],
+            row["source"],
+            tuple(json.loads(row["aliases_json"])),
+        )
 
     @staticmethod
     def _session_from_row(row: sqlite3.Row) -> CustomerSession:

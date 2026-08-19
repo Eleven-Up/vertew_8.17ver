@@ -20,13 +20,159 @@ currently available rather than omitting a response (Req 3.3).
 
 from __future__ import annotations
 
-from models import EMOTIONS, GESTURES, ConversationTurn, StoreInfo
+from models import EMOTIONS, GESTURES, ConversationTurn, Product, QAEntry, StoreInfo
 
 # Maximum number of recent Conversation_Turns included in the prompt (Req 3.2).
 MAX_RECENT_TURNS = 5
 
 # Maximum length of the model's ``text`` field as instructed in the prompt (Req 3.4).
 MAX_TEXT_CHARS = 500
+
+# ---------------------------------------------------------------------------
+# Structured menu knowledge (grounding for product Q&A).
+#
+# ``format_menu_knowledge`` renders the structured product catalog into a labeled,
+# localized text block that is injected into the prompt so the assistant can answer
+# customer questions such as "what is in this?" or "how spicy is it?" from real
+# data instead of guessing. Answer quality for those questions depends on this
+# grounding far more than on model size, so the block is explicit and self-labeled.
+# ---------------------------------------------------------------------------
+
+# Language-independent 0..3 heat scale rendered into words per supported language.
+_SPICE_WORDS: dict[str, dict[int, str]] = {
+    "en": {0: "not spicy", 1: "mild", 2: "medium", 3: "hot"},
+    "ko": {0: "안 매움", 1: "약간 매움", 2: "보통 매움", 3: "많이 매움"},
+    "ms": {0: "tidak pedas", 1: "sedikit pedas", 2: "sederhana pedas", 3: "sangat pedas"},
+}
+
+# Section header and field labels per supported language.
+_MENU_LABELS: dict[str, dict[str, str]] = {
+    "en": {
+        "header": (
+            "MENU (answer questions about the food using only this information; do "
+            "not invent items, prices, ingredients, or spice levels):"
+        ),
+        "price": "Price",
+        "spice": "Spice",
+        "ingredients": "Ingredients",
+        "allergens": "Allergens",
+        "none": "none declared",
+    },
+    "ko": {
+        "header": (
+            "메뉴 (음식에 대한 질문은 아래 정보로만 답하세요; 메뉴·가격·재료·맵기를 "
+            "지어내지 마세요):"
+        ),
+        "price": "가격",
+        "spice": "맵기",
+        "ingredients": "재료",
+        "allergens": "알레르기 유발 성분",
+        "none": "없음",
+    },
+    "ms": {
+        "header": (
+            "MENU (jawab soalan tentang makanan menggunakan maklumat ini sahaja; "
+            "jangan reka item, harga, bahan, atau tahap kepedasan):"
+        ),
+        "price": "Harga",
+        "spice": "Kepedasan",
+        "ingredients": "Bahan",
+        "allergens": "Alergen",
+        "none": "tiada",
+    },
+}
+
+
+def spice_word(level: int, language: str = "en") -> str:
+    """Render a 0..3 spice level into a localized word (clamped to range)."""
+    lang = language if language in _SPICE_WORDS else "en"
+    table = _SPICE_WORDS[lang]
+    return table.get(max(0, min(3, level)), table[0])
+
+
+def _localized(values: dict[str, str] | None, language: str) -> str:
+    """Return the ``language`` string from a per-language mapping, falling back to
+    English, then to any available value, then to the empty string."""
+    if not values:
+        return ""
+    return values.get(language) or values.get("en") or next(iter(values.values()), "")
+
+
+# Curated Q&A block header per language (see format_qa_knowledge).
+_QA_HEADER: dict[str, str] = {
+    "en": (
+        "KNOWN ANSWERS (prefer one of these when it answers the question, and put "
+        "its id in matched_qa_id):"
+    ),
+    "ko": (
+        "정해진 답변 (질문에 맞는 항목이 있으면 우선 사용하고, 그 id를 "
+        "matched_qa_id에 넣으세요):"
+    ),
+    "ms": (
+        "JAWAPAN SEDIA ADA (utamakan salah satu jika ia menjawab soalan, dan letak "
+        "id-nya dalam matched_qa_id):"
+    ),
+}
+
+
+def format_qa_knowledge(entries: list[QAEntry], language: str = "en") -> str:
+    """Render approved Q&A entries into a labeled block for the prompt.
+
+    Only ``approved`` entries are included, each tagged with its id so the model can
+    report which curated answer it used (``matched_qa_id``). Returns an empty string
+    when there are no approved entries.
+    """
+    lang = language if language in _QA_HEADER else "en"
+    approved = [entry for entry in entries if entry.status == "approved"]
+    if not approved:
+        return ""
+    lines: list[str] = [_QA_HEADER[lang]]
+    for entry in approved:
+        answer = _localized(entry.answer, lang)
+        lines.append(f"[{entry.id}] Q: {entry.question} A: {answer}")
+    return "\n".join(lines)
+
+
+def format_menu_knowledge(products: list[Product], language: str = "en") -> str:
+    """Render the available products into a localized menu-knowledge block.
+
+    Only ``available`` products are included. Each line carries the localized name
+    and description, the price, the spice level in words, the ingredients, and the
+    allergens (or a "none declared" marker). Returns an empty string when there is
+    nothing to describe so callers can omit the section entirely.
+
+    The output is deterministic (products in catalog order, no timestamps), so it is
+    safe to include in a cached prompt and straightforward to test.
+    """
+    lang = language if language in _MENU_LABELS else "en"
+    labels = _MENU_LABELS[lang]
+
+    available = [product for product in products if product.available]
+    if not available:
+        return ""
+
+    lines: list[str] = [labels["header"]]
+    for product in available:
+        name = _localized(product.name, lang) or product.id
+        description = _localized(product.description, lang)
+        price = f"{product.currency} {product.price_minor / 100:.2f}"
+        spice = spice_word(product.spice_level, lang)
+        ingredients = _localized(product.ingredients, lang)
+        allergens = ", ".join(product.allergens) if product.allergens else labels["none"]
+
+        detail = f'{labels["price"]}: {price}. {labels["spice"]}: {spice}.'
+        if ingredients:
+            detail += f' {labels["ingredients"]}: {ingredients}.'
+        detail += f' {labels["allergens"]}: {allergens}.'
+
+        prefix = f"- {name}"
+        if description:
+            prefix += f" — {description}."
+        else:
+            prefix += " —"
+        lines.append(f"{prefix} {detail}")
+
+    return "\n".join(lines)
 
 
 def _format_allowed_set(values: frozenset[str]) -> str:
@@ -99,12 +245,24 @@ def build(
     instructions = (
         "INSTRUCTIONS:\n"
         "- Respond with exactly one JSON object and nothing else.\n"
-        "- The JSON object must contain exactly these fields:\n"
+        "- The JSON object must contain these fields:\n"
         f'  - "text": a non-empty string of at most {MAX_TEXT_CHARS} characters.\n'
-        f'  - "emotion": exactly one of these lowercase values and nothing else: '
+        f'  - "emotion": exactly one of these lowercase values: '
         f"{_format_allowed_set(EMOTIONS)}.\n"
-        f'  - "gesture": exactly one of these lowercase values and nothing else: '
+        f'  - "gesture": exactly one of these lowercase values: '
         f"{_format_allowed_set(GESTURES)}.\n"
+        "- The JSON object may also include:\n"
+        '  - "action": either "answer" (default) or "call_owner".\n'
+        '  - "matched_qa_id": the id of the KNOWN ANSWER you used (for example '
+        '"qa_hours"), or null.\n'
+        "- Answer questions about the store using only the information above (the "
+        "KNOWN ANSWERS and the MENU). When a KNOWN ANSWER fits the question, use it "
+        "and set matched_qa_id to its id. When you answer from MENU facts, set "
+        "matched_qa_id to null.\n"
+        "- Never invent prices, ingredients, spice levels, or allergy/health "
+        "information. If the information above does not cover the question, or the "
+        "question is about an allergy or health concern you cannot confirm from it, "
+        'set "action" to "call_owner" and tell the customer you will call the owner.\n'
         "- Reply in the same language the customer used in their message.\n"
         "- Keep the reply to 1-2 short, friendly sentences.\n"
         "- Write the text at a grade-8 reading level or below, using plain "
