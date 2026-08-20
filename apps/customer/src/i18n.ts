@@ -8,6 +8,7 @@ const messages = {
     wait: "Please wait near the store.", notify: "Vertew will let you know when your order is ready.",
     loading: "Preparing your menu…", retry: "Try Again", language: "Language", each: "each",
     readyTitle: "Your order is ready!", readyBody: "Please collect your order at the store.", acknowledge: "OK",
+    pay: "Pay Now", paying: "Processing payment…", paid: "Payment received",
   },
   ko: {
     fresh: "신선한 과일", add: "장바구니 담기", orderNow: "바로 주문", cart: "장바구니",
@@ -16,6 +17,7 @@ const messages = {
     wait: "매장 근처에서 기다려 주세요.", notify: "준비가 완료되면 Vertew가 알려드릴게요.",
     loading: "메뉴를 준비하고 있어요…", retry: "다시 시도", language: "언어", each: "개당",
     readyTitle: "주문이 준비되었습니다!", readyBody: "매장에서 주문하신 상품을 받아주세요.", acknowledge: "확인",
+    pay: "결제하기", paying: "결제 처리 중…", paid: "결제가 완료되었습니다",
   },
   ms: {
     fresh: "Buah-buahan Segar", add: "Tambah ke Troli", orderNow: "Pesan Sekarang", cart: "Troli Anda",
@@ -24,6 +26,7 @@ const messages = {
     wait: "Sila tunggu berhampiran kedai.", notify: "Vertew akan memberitahu apabila pesanan anda siap.",
     loading: "Menyediakan menu anda…", retry: "Cuba Lagi", language: "Bahasa", each: "setiap satu",
     readyTitle: "Pesanan anda sudah siap!", readyBody: "Sila ambil pesanan anda di kedai.", acknowledge: "OK",
+    pay: "Bayar Sekarang", paying: "Memproses pembayaran…", paid: "Pembayaran berjaya",
   },
 } as const;
 

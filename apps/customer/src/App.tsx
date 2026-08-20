@@ -3,7 +3,12 @@ import { createOrder, createSession, getMenu, getOrder, getSession, setLanguage 
 import { copy } from "./i18n";
 import type { Cart, Language, Order, Product, Session } from "./types";
 
-type Screen = "menu" | "cart" | "confirm" | "complete";
+type Screen = "menu" | "cart" | "confirm" | "paying" | "complete";
+
+// No real payment gateway is wired up (mock/demo payment): a brief simulated
+// processing delay stands in for a card/QR-pay charge before the order is
+// actually created, so the flow reads as "pay -> order placed" to the customer.
+const MOCK_PAYMENT_DELAY_MS = 900;
 
 const fruitEmoji: Record<string, string> = {
   watermelon: "🍉", mango: "🥭", banana: "🍌", apple: "🍎",
@@ -135,10 +140,14 @@ export function App() {
     window.scrollTo(0, 0);
   }
 
-  async function submitOrder() {
+  async function payAndSubmit() {
     if (!session || selectedProducts.length === 0) return;
-    setBusy(true);
     setError("");
+    setScreen("paying");
+    window.scrollTo(0, 0);
+    // Simulated payment processing (no real gateway) so the moment reads as an
+    // actual charge rather than an instant, unconvincing jump to "complete".
+    await new Promise((resolve) => setTimeout(resolve, MOCK_PAYMENT_DELAY_MS));
     try {
       const created = await createOrder(storeId, session, cart);
       setOrder(created);
@@ -147,8 +156,7 @@ export function App() {
       window.scrollTo(0, 0);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not place the order");
-    } finally {
-      setBusy(false);
+      setScreen("confirm");
     }
   }
 
@@ -211,11 +219,15 @@ export function App() {
             {screen === "cart" ? <div className="stepper"><button onClick={() => changeQuantity(product.id, -1)}>−</button><b>{cart[product.id]}</b><button onClick={() => changeQuantity(product.id, 1)}>+</button></div> : <b>× {cart[product.id]}</b>}
           </div>)}
         <div className="total"><span>{t.total}</span><strong>{money(total)}</strong></div>
-        {screen === "cart" ? <button className="wide" disabled={!count} onClick={() => setScreen("confirm")}>{t.place}</button> : <button className="wide" disabled={busy || !count} onClick={() => void submitOrder()}>{t.confirm}</button>}
+        {screen === "cart" ? <button className="wide" disabled={!count} onClick={() => setScreen("confirm")}>{t.place}</button> : <button className="wide" disabled={!count} onClick={() => void payAndSubmit()}>{t.pay}</button>}
+      </main>}
+
+      {screen === "paying" && <main className="center">
+        <div className="loader" /><p>{t.paying}</p>
       </main>}
 
       {screen === "complete" && order && <main className="complete">
-        <div className="check">✓</div><h1>{t.complete}</h1><p>{t.number}</p><div className="order-number">#{order.order_number}</div><p>{t.wait}<br/>{t.notify}</p>
+        <div className="check">✓</div><h1>{t.paid}</h1><p>{t.complete}</p><p>{t.number}</p><div className="order-number">#{order.order_number}</div><p>{t.wait}<br/>{t.notify}</p>
       </main>}
 
       {screen === "menu" && <button className="cart-button" onClick={() => setScreen("cart")}><span>🛒</span>{t.cart}<b>{count}</b></button>}

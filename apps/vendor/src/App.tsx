@@ -110,7 +110,7 @@ export function App() {
       <div className={`connection ${connected ? "online" : "offline"}`}><i/>{connected ? "LIVE" : "RECONNECTING"}</div>
     </header>
 
-    {toast && <div className="toast"><span>🔔</span><div><b>New Order #{toast.order_number}</b><small>{summary(toast)}</small></div></div>}
+    {toast && <div className="toast"><span>💰</span><div><b>Payment received · Order #{toast.order_number}</b><small>Prepare: {summary(toast)}</small></div></div>}
     {error && <div className="error" role="alert">{error}<button onClick={() => void load()}>Retry</button></div>}
 
     {calls.length > 0 && <section className="calls" role="alert" aria-live="assertive">
@@ -157,5 +157,5 @@ function actions(order: Order): { status: OrderStatus; label: string; className?
   }
 }
 
-function label(status: OrderStatus): string { return ({ PENDING: "NEW ORDER", ACCEPTED: "ACCEPTED", PREPARING: "PREPARING", READY: "READY", COMPLETED: "COMPLETED", REJECTED: "REJECTED" })[status]; }
+function label(status: OrderStatus): string { return ({ PENDING: "PAID · NEW", ACCEPTED: "ACCEPTED", PREPARING: "PREPARING", READY: "READY", COMPLETED: "COMPLETED", REJECTED: "REJECTED" })[status]; }
 function summary(order: Order): string { return order.items.map((item) => `${item.product_name.en} × ${item.quantity}`).join(", "); }
