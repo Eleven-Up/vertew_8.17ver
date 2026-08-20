@@ -33,4 +33,19 @@ export interface Order {
   currency: string;
 }
 
-export type Cart = Record<string, number>;
+// The customer's in-progress order as recognized so far from the voice
+// conversation with Vertew (or edited on this page) -- not yet paid, so not a
+// real vendor-visible Order until POST .../draft/checkout.
+export interface DraftItem {
+  product_id: string;
+  quantity: number;
+  name: Record<Language, string>;
+  unit_price_minor: number;
+}
+
+export interface Draft {
+  session_id: string;
+  items: DraftItem[];
+  total_minor: number;
+  currency: string;
+}

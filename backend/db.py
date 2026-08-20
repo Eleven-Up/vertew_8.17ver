@@ -117,6 +117,13 @@ CREATE TABLE IF NOT EXISTS order_items (
     FOREIGN KEY (order_id) REFERENCES orders(id)
 );
 
+CREATE TABLE IF NOT EXISTS session_drafts (
+    session_id  TEXT PRIMARY KEY,
+    items_json  TEXT NOT NULL DEFAULT '{}',
+    updated_at  TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES customer_sessions(id)
+);
+
 CREATE TABLE IF NOT EXISTS media_assets (
     store_id    TEXT NOT NULL,
     event_type  TEXT NOT NULL,
@@ -477,6 +484,63 @@ class DataStore:
             (language, source.value, _to_iso(datetime.now(timezone.utc)), session_id),
         )
         return self.get_session(session_id)
+
+    # ------------------------------------------------------------------
+    # Draft order (pre-payment scratch state, scoped to one customer session).
+    #
+    # Populated incrementally as the Conversation_Server recognizes ordered
+    # items from natural speech (merge_draft_items) and edited directly by the
+    # customer's payment-page +/-/remove buttons (set_draft_items, an absolute
+    # replace rather than a delta). Cleared once checkout_draft turns it into a
+    # real, vendor-visible Order.
+    # ------------------------------------------------------------------
+    def get_draft_items(self, session_id: str) -> dict[str, int]:
+        row = self._conn.execute(
+            "SELECT items_json FROM session_drafts WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        return json.loads(row["items_json"]) if row else {}
+
+    def set_draft_items(self, session_id: str, items: dict[str, int]) -> dict[str, int]:
+        """Replace the draft with exactly these quantities (an absolute set, not
+        a delta) -- used by the payment page's button edits. Non-positive
+        quantities are dropped rather than stored as zero/negative rows."""
+        cleaned = {product_id: quantity for product_id, quantity in items.items() if quantity > 0}
+        self._write_with_retry(
+            "INSERT INTO session_drafts (session_id, items_json, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET items_json = excluded.items_json, "
+            "updated_at = excluded.updated_at",
+            (session_id, json.dumps(cleaned), _to_iso(datetime.now(timezone.utc))),
+        )
+        return cleaned
+
+    def merge_draft_items(self, session_id: str, deltas: list[tuple[str, int]]) -> dict[str, int]:
+        """Add quantities on top of the current draft -- used when the
+        conversation recognizes newly-ordered items from natural speech (an
+        incremental delta, unlike the payment page's absolute set_draft_items)."""
+        current = self.get_draft_items(session_id)
+        for product_id, quantity in deltas:
+            current[product_id] = max(0, current.get(product_id, 0) + quantity)
+        return self.set_draft_items(session_id, current)
+
+    def clear_draft(self, session_id: str) -> None:
+        self._write_with_retry("DELETE FROM session_drafts WHERE session_id = ?", (session_id,))
+
+    def checkout_draft(
+        self, store_id: str, session_id: str, customer_language: str, order_source: str = "qr"
+    ) -> Order:
+        """Turn the session's current draft into a real, vendor-visible Order
+        (reusing create_order's validation/order-numbering) and clear the draft.
+
+        Raises ``ValueError("draft_empty")`` when there is nothing to check out.
+        """
+        items = self.get_draft_items(session_id)
+        if not items:
+            raise ValueError("draft_empty")
+        order = self.create_order(
+            store_id, session_id, list(items.items()), customer_language, order_source
+        )
+        self.clear_draft(session_id)
+        return order
 
     def create_order(
         self,

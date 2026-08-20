@@ -1,4 +1,4 @@
-import type { Cart, Language, Order, Product, Session } from "./types";
+import type { Draft, Language, Order, Session } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -10,11 +10,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(data?.detail ?? `Request failed (${response.status})`);
   }
   return response.json() as Promise<T>;
-}
-
-export async function getMenu(storeId: string): Promise<Product[]> {
-  const data = await request<{ products: Product[] }>(`/api/stores/${storeId}/menu`);
-  return data.products;
 }
 
 export function getSession(sessionId: string): Promise<Session> {
@@ -35,21 +30,27 @@ export function setLanguage(sessionId: string, language: Language): Promise<Sess
   });
 }
 
-export function createOrder(
-  storeId: string,
-  session: Session,
-  cart: Cart,
-): Promise<Order> {
-  return request("/api/orders", {
-    method: "POST",
-    body: JSON.stringify({
-      store_id: storeId,
-      session_id: session.id,
-      items: Object.entries(cart).map(([product_id, quantity]) => ({ product_id, quantity })),
-      customer_language: session.language,
-      order_source: "qr",
-    }),
+// The order-so-far, as Vertew recognized it from the voice conversation (or as
+// edited here). Not yet paid/vendor-visible -- see checkoutDraft.
+export function getDraft(sessionId: string): Promise<Draft> {
+  return request(`/api/sessions/${sessionId}/draft`);
+}
+
+// Absolute replace of the draft's quantities (omit an item to remove it) --
+// used by this page's +/-/remove buttons, not by the voice conversation.
+export function updateDraft(
+  sessionId: string,
+  items: { product_id: string; quantity: number }[],
+): Promise<Draft> {
+  return request(`/api/sessions/${sessionId}/draft`, {
+    method: "PATCH",
+    body: JSON.stringify({ items }),
   });
+}
+
+// Mock payment: turns the current draft into a real, vendor-visible order.
+export function checkoutDraft(sessionId: string): Promise<Order> {
+  return request(`/api/sessions/${sessionId}/draft/checkout`, { method: "POST" });
 }
 
 export function getOrder(orderId: string): Promise<Order> {

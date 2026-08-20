@@ -24,6 +24,17 @@ DEFAULT_EMOTION: str = "neutral"
 DEFAULT_GESTURE: str = "idle"
 
 
+@dataclass(frozen=True)
+class OrderItemDelta:
+    """One item the customer just ordered in this turn, as the LLM recognized it
+    from natural speech (product_id from the MENU block + quantity). Merged into
+    the session's draft order by the Conversation_Server -- see
+    conversation.handle_transcript and db.DataStore.merge_draft_items."""
+
+    product_id: str
+    quantity: int
+
+
 @dataclass
 class CharacterResponse:
     """A single character response delivered to the Kiosk_UI.
@@ -45,6 +56,9 @@ class CharacterResponse:
     # the human-escalation and the learning loop; see conversation.handle_transcript.
     action: str = "answer"
     matched_qa_id: str | None = None
+    # Items the customer ordered in this turn (empty when none were), merged into
+    # the session's draft order rather than sent to the Kiosk_UI wire payload.
+    order_items: tuple[OrderItemDelta, ...] = ()
 
 
 @dataclass
