@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import sqlite3
 import json
+import threading
 import uuid
 from datetime import datetime, timezone
 
@@ -193,6 +194,117 @@ class StorageError(RuntimeError):
     """Raised when a persistence operation fails after exhausting its retries."""
 
 
+class _FetchedCursor:
+    """Pre-fetched stand-in for a ``sqlite3.Cursor``, returned by
+    :meth:`_LockedConnection.execute`. Rows (and ``rowcount``/``lastrowid``)
+    are captured while the lock is still held, so ``.fetchall()``/``.fetchone()``
+    are just returning already-materialized data -- no further access to the
+    shared connection, which is the point (see :class:`_LockedConnection`)."""
+
+    def __init__(self, rows: list, rowcount: int, lastrowid: int | None) -> None:
+        self._rows = rows
+        self.rowcount = rowcount
+        self.lastrowid = lastrowid
+
+    def fetchall(self) -> list:
+        return self._rows
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+
+class _LockedConnection:
+    """Thread-safe proxy around one ``sqlite3.Connection``, serializing every
+    operation with a lock.
+
+    FastAPI runs every plain ``def`` (non-``async``) route handler in a worker
+    thread pool, so several requests can call into :class:`DataStore`
+    concurrently from *different* threads. ``sqlite3.Connection`` -- even
+    opened with ``check_same_thread=False`` -- is not safe for truly
+    concurrent use from multiple threads at once; that showed up as sporadic
+    ``sqlite3.InterfaceError: bad parameter or other API misuse`` once the
+    order-status board's polling made concurrent reads common. A re-entrant
+    lock (``RLock``) lets a method that needs several statements to be atomic
+    (see :meth:`DataStore.create_order`) hold the lock across all of them --
+    the individual calls proxied through here just re-acquire it, which is a
+    no-op for the thread already holding it.
+
+    Every call site in this module keeps calling ``self._conn.execute(...)``
+    etc. unchanged; this class exists purely so those calls funnel through one
+    lock without having to rewrite each of them individually.
+
+    ``execute()`` fetches all rows (and captures ``rowcount``) *before*
+    releasing the lock, returning a :class:`_FetchedCursor` rather than the
+    live ``sqlite3.Cursor``. Every call site in this module chains exactly one
+    ``.fetchall()``/``.fetchone()`` immediately after ``execute(...)`` (never a
+    cursor stored and read later), so this is a transparent swap -- but it
+    matters: fetching rows from a live cursor is itself a connection-touching
+    operation, so handing one back and letting the *caller* fetch outside the
+    lock would reopen the exact race this class exists to close.
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+        self._lock = threading.RLock()
+
+    def __enter__(self):
+        # Several call sites use `with self._conn:` for sqlite3.Connection's
+        # own commit-on-success/rollback-on-exception transaction protocol;
+        # hold the lock for the whole block so it's atomic w.r.t. other
+        # threads too, not just w.r.t. other Python-level statements.
+        self._lock.acquire()
+        self._conn.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            return self._conn.__exit__(exc_type, exc_val, exc_tb)
+        finally:
+            self._lock.release()
+
+    def execute(self, *args, **kwargs) -> "_FetchedCursor":
+        with self._lock:
+            cursor = self._conn.execute(*args, **kwargs)
+            return _FetchedCursor(cursor.fetchall(), cursor.rowcount, cursor.lastrowid)
+
+    def executemany(self, *args, **kwargs):
+        with self._lock:
+            return self._conn.executemany(*args, **kwargs)
+
+    def executescript(self, *args, **kwargs):
+        with self._lock:
+            return self._conn.executescript(*args, **kwargs)
+
+    def commit(self) -> None:
+        with self._lock:
+            self._conn.commit()
+
+    def rollback(self) -> None:
+        with self._lock:
+            self._conn.rollback()
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+    def atomic(self):
+        """Context manager holding the lock across multiple statements that
+        must run as one atomic unit with respect to other threads (e.g. a
+        BEGIN/.../COMMIT sequence) -- see :meth:`DataStore.create_order`.
+        Re-entrant, so the individual proxied calls inside the `with` block
+        re-acquiring the same lock is a no-op, not a deadlock.
+        """
+        return self._lock
+
+    @property
+    def row_factory(self):
+        return self._conn.row_factory
+
+    @row_factory.setter
+    def row_factory(self, value) -> None:
+        self._conn.row_factory = value
+
+
 class DataStore:
     """SQLite-backed repository for store info and the conversation log.
 
@@ -209,8 +321,10 @@ class DataStore:
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
         # check_same_thread=False keeps the connection usable from FastAPI worker
-        # threads; access is otherwise serialized through this repository.
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        # threads; access is actually serialized through _LockedConnection's lock
+        # (check_same_thread=False alone only disables Python's same-thread guard,
+        # it does not make concurrent use from multiple threads safe).
+        self._conn = _LockedConnection(sqlite3.connect(db_path, check_same_thread=False))
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self.load_failed = False
@@ -567,29 +681,30 @@ class DataStore:
         now = datetime.now(timezone.utc)
         order_id = f"order_{uuid.uuid4().hex}"
         total = sum(item.unit_price_minor * item.quantity for item in items)
-        try:
-            self._conn.execute("BEGIN IMMEDIATE")
-            next_number = self._conn.execute(
-                "SELECT COALESCE(MAX(order_number), 0) + 1 FROM orders WHERE store_id = ?",
-                (store_id,),
-            ).fetchone()[0]
-            self._conn.execute(
-                "INSERT INTO orders (id, store_id, session_id, order_number, status, customer_language, order_source, total_minor, currency, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, 'PENDING', ?, ?, ?, 'MYR', ?, ?)",
-                (order_id, store_id, session_id, next_number, customer_language, order_source, total, _to_iso(now), _to_iso(now)),
-            )
-            self._conn.executemany(
-                "INSERT INTO order_items (order_id, product_id, quantity, product_name_json, unit_price_minor) VALUES (?, ?, ?, ?, ?)",
-                [(order_id, item.product_id, item.quantity, json.dumps(item.product_name, ensure_ascii=False), item.unit_price_minor) for item in items],
-            )
-            self._conn.execute(
-                "UPDATE customer_sessions SET order_id = ?, updated_at = ? WHERE id = ?",
-                (order_id, _to_iso(now), session_id),
-            )
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+        with self._conn.atomic():
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                next_number = self._conn.execute(
+                    "SELECT COALESCE(MAX(order_number), 0) + 1 FROM orders WHERE store_id = ?",
+                    (store_id,),
+                ).fetchone()[0]
+                self._conn.execute(
+                    "INSERT INTO orders (id, store_id, session_id, order_number, status, customer_language, order_source, total_minor, currency, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, 'PENDING', ?, ?, ?, 'MYR', ?, ?)",
+                    (order_id, store_id, session_id, next_number, customer_language, order_source, total, _to_iso(now), _to_iso(now)),
+                )
+                self._conn.executemany(
+                    "INSERT INTO order_items (order_id, product_id, quantity, product_name_json, unit_price_minor) VALUES (?, ?, ?, ?, ?)",
+                    [(order_id, item.product_id, item.quantity, json.dumps(item.product_name, ensure_ascii=False), item.unit_price_minor) for item in items],
+                )
+                self._conn.execute(
+                    "UPDATE customer_sessions SET order_id = ?, updated_at = ? WHERE id = ?",
+                    (order_id, _to_iso(now), session_id),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
         return self.get_order(order_id)  # type: ignore[return-value]
 
     def get_order(self, order_id: str) -> Order | None:
