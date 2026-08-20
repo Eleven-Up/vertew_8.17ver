@@ -2,9 +2,10 @@ import QRCode from "qrcode";
 import { createCharacterRenderer } from "./character.js";
 import { ChatClient, buildWsUrl } from "./chat.js";
 import { createChatLog } from "./chatlog.js";
-import { analyzeTranscript, createCustomerSession, getCustomerSession, getReadyOrders, EventVideoQueue, loadMediaConfig, StoreEventClient, type StoreEvent } from "./hologram.js";
+import { analyzeTranscript, createCustomerSession, getCustomerSession, getReadyOrders, getSttConfig, EventVideoQueue, loadMediaConfig, StoreEventClient, type StoreEvent } from "./hologram.js";
 import { KioskController, createDomKioskView } from "./kiosk.js";
-import { WebSpeechSttProvider, WebSpeechTtsEngine } from "./speech.js";
+import { LocalSttProvider, WebSpeechSttProvider, WebSpeechTtsEngine } from "./speech.js";
+import type { SttProvider } from "./types.js";
 
 const STORE_ID = "demo";
 const readyCopy: Record<string, (number: number) => string> = {
@@ -20,14 +21,22 @@ export async function startKiosk(): Promise<void> {
   document.body.dataset.display = displayMode;
   document.body.classList.toggle("debug-enabled", debug);
 
-  const [media, session] = await Promise.all([loadMediaConfig(STORE_ID), restoreSession(STORE_ID)]);
+  const [media, session, sttConfig] = await Promise.all([
+    loadMediaConfig(STORE_ID),
+    restoreSession(STORE_ID),
+    getSttConfig(),
+  ]);
   const sessionId = session.id;
   window.sessionStorage.setItem(`vertew-session-${STORE_ID}`, sessionId);
   const qrUrl = `${window.location.origin}/order/store/${STORE_ID}?session=${sessionId}`;
   await renderQr(qrUrl);
 
   const renderer = createCharacterRenderer();
-  const stt = new WebSpeechSttProvider("en-US");
+  // "local": record + POST to the backend (faster-whisper, fully offline) --
+  // used when the browser's own Web Speech API can't reach Google's speech
+  // service. Otherwise fall back to the browser's built-in recognizer.
+  const stt: SttProvider =
+    sttConfig.provider === "local" ? new LocalSttProvider("en-US") : new WebSpeechSttProvider("en-US");
   const tts = new WebSpeechTtsEngine("en-US");
   const view = createDomKioskView();
   const chatLog = createChatLog();

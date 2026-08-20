@@ -105,6 +105,21 @@ export async function loadMediaConfig(storeId: string): Promise<MediaConfig> {
   return response.json() as Promise<MediaConfig>;
 }
 
+/**
+ * Which STT backend the Kiosk_UI should use ("browser" | "local"; see
+ * backend/stt.py). Degrades to "browser" -- the historical default -- on any
+ * failure rather than throwing, so a hiccup here never blocks kiosk boot.
+ */
+export async function getSttConfig(): Promise<{ provider: string }> {
+  try {
+    const response = await fetch("/api/stt/config");
+    if (!response.ok) return { provider: "browser" };
+    return (await response.json()) as { provider: string };
+  } catch {
+    return { provider: "browser" };
+  }
+}
+
 export async function createCustomerSession(storeId: string): Promise<{ id: string; language: string }> {
   const response = await fetch("/api/sessions", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ store_id: storeId }),

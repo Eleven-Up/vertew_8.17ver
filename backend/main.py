@@ -46,6 +46,7 @@ import commerce_api
 import debug_api
 import llm
 import sensor_api
+import stt_api
 from conversation import ConversationSession, handle_transcript
 from db import DataStore
 from realtime import ClientRole, build_event, manager
@@ -133,6 +134,7 @@ app.include_router(commerce_api.router)
 app.include_router(ai_api.router)
 app.include_router(debug_api.router)
 app.include_router(sensor_api.router)
+app.include_router(stt_api.router)
 
 
 def _extract_transcript(message: object) -> str | None:
