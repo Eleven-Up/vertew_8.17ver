@@ -2,12 +2,15 @@ import QRCode from "qrcode";
 import { createCharacterRenderer } from "./character.js";
 import { ChatClient, buildWsUrl } from "./chat.js";
 import { createChatLog } from "./chatlog.js";
-import { analyzeTranscript, createCustomerSession, getCustomerSession, getReadyOrders, getSttConfig, EventVideoQueue, loadMediaConfig, StoreEventClient, type StoreEvent } from "./hologram.js";
+import { analyzeTranscript, createCustomerSession, getActiveOrders, getCustomerSession, getReadyOrders, getSttConfig, EventVideoQueue, loadMediaConfig, StoreEventClient, type BoardOrder, type StoreEvent } from "./hologram.js";
 import { KioskController, createDomKioskView } from "./kiosk.js";
 import { LocalSttProvider, WebSpeechSttProvider, WebSpeechTtsEngine } from "./speech.js";
 import type { SttProvider } from "./types.js";
 
 const STORE_ID = "demo";
+const ORDER_BOARD_EVENTS = new Set([
+  "new_order", "order_accepted", "order_preparing", "order_ready", "order_completed", "order_rejected",
+]);
 const readyCopy: Record<string, (number: number) => string> = {
   en: (number) => `Order number ${number}! Your order is ready!`,
   ko: (number) => `${number}번 고객님! 주문하신 상품이 준비되었습니다!`,
@@ -17,7 +20,9 @@ const readyCopy: Record<string, (number: number) => string> = {
 export async function startKiosk(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const displayMode = params.get("display") === "tablet" ? "tablet" : "hologram";
-  const debug = params.get("debug") !== "false";
+  // Off by default -- the real 7" kiosk display never passes ?debug=true, so
+  // the demo control panel only appears when explicitly requested for testing.
+  const debug = params.get("debug") === "true";
   document.body.dataset.display = displayMode;
   document.body.classList.toggle("debug-enabled", debug);
 
@@ -101,7 +106,53 @@ export async function startKiosk(): Promise<void> {
       if (orderId) announcedOrders.add(orderId);
       await announceReady(orderNumber, language);
     }
+    if (ORDER_BOARD_EVENTS.has(event.type)) void refreshOrderBoard();
   }
+
+  const ORDER_STATUS_LABEL: Record<string, string> = {
+    PENDING: "NEW", ACCEPTED: "ACCEPTED", PREPARING: "PREPARING", READY: "READY",
+  };
+  const ORDER_STATUS_BADGE_CLASS: Record<string, string> = {
+    PENDING: "order-badge--pending", ACCEPTED: "order-badge--accepted",
+    PREPARING: "order-badge--preparing", READY: "order-badge--ready",
+  };
+
+  function renderOrderBoard(orders: BoardOrder[]): void {
+    const list = required("order-board-list");
+    list.textContent = "";
+    if (orders.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "order-board-empty";
+      empty.textContent = "No orders in progress.";
+      list.appendChild(empty);
+      return;
+    }
+    for (const order of [...orders].sort((a, b) => b.order_number - a.order_number)) {
+      const card = document.createElement("article");
+      card.className = "order-card";
+
+      const head = document.createElement("div");
+      head.className = "order-card-head";
+      const num = document.createElement("b");
+      num.textContent = `#${order.order_number}`;
+      const badge = document.createElement("span");
+      badge.className = `order-badge ${ORDER_STATUS_BADGE_CLASS[order.status] ?? "order-badge--pending"}`;
+      badge.textContent = ORDER_STATUS_LABEL[order.status] ?? order.status;
+      head.append(num, badge);
+
+      const items = document.createElement("div");
+      items.className = "order-items";
+      items.textContent = order.items.map((item) => `${item.product_name.en ?? item.product_id} ×${item.quantity}`).join(", ");
+
+      card.append(head, items);
+      list.appendChild(card);
+    }
+  }
+
+  const refreshOrderBoard = async (): Promise<void> => {
+    try { renderOrderBoard(await getActiveOrders(STORE_ID)); }
+    catch { /* keep showing the last known board; retried on the next tick */ }
+  };
 
   let readyDismissTimer: ReturnType<typeof window.setTimeout> | null = null;
   async function announceReady(orderNumber: number, language: string): Promise<void> {
@@ -162,6 +213,8 @@ export async function startKiosk(): Promise<void> {
   };
   window.setInterval(() => void recoverReadyOrder(), 3000);
   void recoverReadyOrder();
+  window.setInterval(() => void refreshOrderBoard(), 3000);
+  void refreshOrderBoard();
   renderer.playIdle();
 }
 

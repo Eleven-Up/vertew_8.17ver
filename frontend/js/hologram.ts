@@ -147,6 +147,25 @@ export async function getReadyOrders(storeId: string): Promise<Array<{ id: strin
   return data.orders;
 }
 
+/** One order as shown on the hologram's read-only order-status board. */
+export interface BoardOrder {
+  id: string;
+  order_number: number;
+  status: "PENDING" | "ACCEPTED" | "PREPARING" | "READY" | "COMPLETED" | "REJECTED";
+  items: Array<{ product_id: string; quantity: number; product_name: Record<string, string> }>;
+}
+
+const BOARD_STATUSES = new Set(["PENDING", "ACCEPTED", "PREPARING", "READY"]);
+
+/** Every order the vendor is still working (excludes COMPLETED/REJECTED) --
+ * what waiting customers can check on the shared hologram display. */
+export async function getActiveOrders(storeId: string): Promise<BoardOrder[]> {
+  const response = await fetch(`/api/stores/${encodeURIComponent(storeId)}/orders`);
+  if (!response.ok) throw new Error("Could not load store orders");
+  const data = await response.json() as { orders: BoardOrder[] };
+  return data.orders.filter((order) => BOARD_STATUSES.has(order.status));
+}
+
 export async function analyzeTranscript(
   sessionId: string,
   transcript: string,
