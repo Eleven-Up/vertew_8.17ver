@@ -186,6 +186,10 @@ async function restoreSession(storeId: string): Promise<{ id: string; language: 
 async function renderQr(value: string): Promise<void> {
   const dataUrl = await QRCode.toDataURL(value, { width: 420, margin: 2, color: { dark: "#05060aff", light: "#ffffffff" } });
   document.querySelectorAll<HTMLImageElement>(".session-qr").forEach((image) => { image.src = dataUrl; });
+  // Also show the plain link so the same machine can open/copy it directly
+  // without needing an actual phone to scan the code (handy for dev/testing).
+  const link = document.getElementById("qr-link") as HTMLAnchorElement | null;
+  if (link) { link.href = value; link.textContent = value; }
 }
 
 function showQr(show: boolean): void { document.body.classList.toggle("qr-expanded", show); }
