@@ -129,6 +129,18 @@ export async function startKiosk(): Promise<void> {
   required("debug-ko").addEventListener("click", () => { currentLanguage = "ko"; required("language-label").textContent = "KO"; });
   required("debug-en").addEventListener("click", () => { currentLanguage = "en"; required("language-label").textContent = "EN"; });
   required("debug-ms").addEventListener("click", () => { currentLanguage = "ms"; required("language-label").textContent = "MS"; });
+  required("debug-transcript-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const input = required<HTMLInputElement>("debug-transcript-input");
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    // Bypass the mic entirely: fake a tap (if needed) then feed the typed text
+    // straight in as if the Speech_Module had produced it, so the rest of the
+    // flow (server round-trip, character render, TTS) can be tested without STT.
+    if (controller.state === "idle") controller.onTap();
+    controller.onTranscript(text);
+  });
   const recoverReadyOrder = async () => {
     try {
       const readyOrders = await getReadyOrders(STORE_ID);
