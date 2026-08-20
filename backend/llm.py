@@ -344,7 +344,7 @@ class OpenAICompatibleClient:
             "messages": [{"role": "user", "content": prompt}],
             # Cap generation so worst-case latency stays bounded (Req 4.2 keeps the
             # text short anyway); the prompt also asks for 1-2 short sentences.
-            "max_tokens": 300,
+            "max_tokens": 2048,
         }
 
         response = await self._http.post(url, headers=headers, json=payload)
