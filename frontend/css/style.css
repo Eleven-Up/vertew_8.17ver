@@ -273,7 +273,7 @@ body {
   background: var(--accent);
   animation: pulse 1s ease-in-out infinite;
 }
-#listening-indicator::after { content: "듣고 있어요…"; }
+#listening-indicator::after { content: "Listening…"; }
 @keyframes pulse {
   0%, 100% { opacity: 0.35; transform: scale(0.8); }
   50% { opacity: 1; transform: scale(1.3); }

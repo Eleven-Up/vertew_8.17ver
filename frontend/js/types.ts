@@ -9,7 +9,7 @@ export type UIState = "idle" | "listening" | "processing" | "speaking" | "error"
 // one facial expression / body motion of the single 2D character (Req 5.6).
 // ---------------------------------------------------------------------------
 export const EMOTIONS = ["happy", "neutral", "surprised", "sad", "angry"] as const;
-export const GESTURES = ["wave", "idle", "point", "nod", "think"] as const;
+export const GESTURES = ["wave", "idle", "point", "nod", "think", "fly", "jump", "approach"] as const;
 
 export type Emotion = (typeof EMOTIONS)[number];
 export type Gesture = (typeof GESTURES)[number];

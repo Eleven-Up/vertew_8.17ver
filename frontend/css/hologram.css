@@ -9,7 +9,18 @@ body { background: #000; color: #fff; font-family: Inter, "Arial Black", system-
  * chat log (right) are fixed-width side columns; the character/hero-copy sit in
  * the remaining center gap, which is naturally screen-centered since both side
  * columns are the same width. */
-#character { position: absolute; z-index: 2; left: 50%; top: 40%; width: min(46vw, 340px); aspect-ratio: 1; transform: translate(-50%,-50%); overflow: visible; filter: drop-shadow(0 0 25px rgba(78,229,246,.3)); }
+/* Centered via margin (not transform) so #character's own `transform` is free
+ * for the per-emotion animations below without fighting a static centering
+ * transform every keyframe would otherwise need to repeat. */
+#character { position: absolute; z-index: 2; left: 50%; top: 40%; width: min(46vw, 340px); aspect-ratio: 1; margin-left: calc(min(46vw, 340px) / -2); margin-top: calc(min(46vw, 340px) / -2); overflow: visible; filter: drop-shadow(0 0 25px rgba(78,229,246,.3)); }
+/* Per-emotion secondary motion, on the OUTER #character wrapper -- deliberately
+ * a different element than .vertew-rig (which carries gesture/idle motion) and
+ * than .vertew-base (which anime.js drives directly during pose crossfades),
+ * so none of the three ever fight over the `transform` property. */
+#character.expr-happy { animation: emote-happy 1s ease-in-out infinite; }
+#character.expr-sad { animation: emote-sad 2.4s ease-in-out infinite; }
+#character.expr-angry { animation: emote-angry .3s ease-in-out infinite; }
+#character.expr-surprised { animation: emote-surprised .5s cubic-bezier(.34,1.56,.64,1) 1; }
 .vertew-rig { position: absolute; inset: 0; transform-origin: 50% 70%; animation: holo-float 4s ease-in-out infinite; }
 .vertew-base { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
 .vertew-eyelid { position: absolute; z-index: 3; left: 46.6%; top: 37.6%; width: 5.5%; height: 0; border-radius: 50%; background: #050508; transform: rotate(-8deg); transform-origin: center; animation: vertew-blink 5.2s infinite; }
@@ -21,8 +32,14 @@ body { background: #000; color: #fff; font-family: Inter, "Arial Black", system-
 #character.motion-point .vertew-rig { animation: vertew-point .8s ease-in-out 2; }
 #character.motion-nod .vertew-rig { animation: vertew-nod .65s ease-in-out 2; }
 #character.motion-think .vertew-rig { animation: vertew-think 1.5s ease-in-out infinite; }
+#character.motion-fly .vertew-rig { animation: vertew-fly 1s ease-in-out 2; }
+#character.motion-jump .vertew-rig { animation: vertew-jump .6s cubic-bezier(.34,1.56,.64,1) 2; }
+#character.motion-approach .vertew-rig { animation: vertew-approach 1.2s ease-out 1 forwards; }
 #character.expr-happy .vertew-rig { filter: brightness(1.08) saturate(1.08); }
 #character.expr-sad .vertew-rig { transform: rotate(-3deg) translateY(8px); filter: saturate(.78); }
+/* Attentive listening loop -- a slower, focused lean distinct from the ambient
+ * idle breathing loop below, so "listening" reads as its own state at a glance. */
+.character-listening-loop .vertew-rig { animation: vertew-listen-sway 2.2s ease-in-out infinite; }
 #hologram-video { position: absolute; z-index: 5; inset: 0; width: 100%; height: 100%; display: none; object-fit: contain; background: #000; }
 body.video-playing #hologram-video { display: block; }body.video-playing #character, body.video-playing .hero-copy { visibility: hidden; }
 .hero-copy { position: absolute; z-index: 3; left: 50%; bottom: 5%; transform: translateX(-50%); max-width: 380px; text-align: center; text-shadow: 0 3px 14px #000; }.hero-copy p { margin: 0; color: var(--pink); font-size: 12px; font-weight: 1000; letter-spacing: .22em; }.hero-copy h1 { margin: 2px 0; font-size: 34px; line-height: .95; }.hero-copy span { color: #d4d9e1; font-size: 14px; font-weight: 800; }
@@ -60,6 +77,14 @@ body[data-display="tablet"] #stage { background: radial-gradient(circle at 50% 4
 @keyframes vertew-point { 0%,100% { transform: translateX(0); } 45% { transform: translateX(18px) rotate(2deg); } }
 @keyframes vertew-nod { 0%,100% { transform: rotate(0); } 50% { transform: rotate(4deg) translateY(12px); } }
 @keyframes vertew-think { 0%,100% { transform: rotate(0); } 50% { transform: rotate(-3deg) translateY(-5px); } }
+@keyframes vertew-fly { 0%,100% { transform: translate(0,0) rotate(0); } 30% { transform: translate(14px,-16px) rotate(-4deg); } 60% { transform: translate(-10px,-22px) rotate(3deg); } }
+@keyframes vertew-jump { 0%,100% { transform: translateY(0) scale(1,1); } 30% { transform: translateY(4px) scale(1.06,.94); } 55% { transform: translateY(-30px) scale(.96,1.05); } 80% { transform: translateY(2px) scale(1.03,.97); } }
+@keyframes vertew-approach { 0% { transform: scale(1) translateY(0); } 100% { transform: scale(1.12) translateY(6px); } }
+@keyframes vertew-listen-sway { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-4px) rotate(-2deg); } }
+@keyframes emote-happy { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-6px) scale(1.03); } }
+@keyframes emote-sad { 0%,100% { transform: translateY(0); } 50% { transform: translateY(4px); } }
+@keyframes emote-angry { 0%,100% { transform: translateX(0) rotate(0); } 25% { transform: translateX(-3px) rotate(-1deg); } 75% { transform: translateX(3px) rotate(1deg); } }
+@keyframes emote-surprised { 0% { transform: scale(1); } 30% { transform: scale(1.12); } 60% { transform: scale(.97); } 100% { transform: scale(1); } }
 @keyframes effect-pop { 0%,100% { transform: scale(.88) translateY(4px); } 50% { transform: scale(1.04) translateY(-5px); } }
 @keyframes sparkle { to { transform: scale(1.3) rotate(20deg); opacity: .55; } }
 @media (max-width:700px) { #character { width: min(94vw, 680px); top: 45%; }#debug-panel { top: 58px; left: 8px; transform: scale(.8); transform-origin: top left; }.top-bar { inset: 14px; }.hero-copy { bottom: 160px; }.qr-panel { right: 14px; bottom: 14px; width: 105px; }.qr-panel img { width: 82px; height: 82px; }#order-board,#chat-log { display: none; } }

@@ -40,10 +40,10 @@ export type ErrorKind = "mic" | "stt-empty" | "network" | "tts";
 
 /** User-facing copy for each {@link ErrorKind}. */
 export const ERROR_MESSAGES: Record<ErrorKind, string> = {
-  mic: "마이크를 사용할 수 없어요. 권한을 확인하고 다시 시도해 주세요.",
-  "stt-empty": "잘 못 들었어요. 화면을 탭하고 다시 말씀해 주세요.",
-  network: "연결이 원활하지 않아요. 잠시 후 다시 시도해 주세요.",
-  tts: "음성을 재생할 수 없어요.",
+  mic: "Microphone unavailable. Please check permissions and try again.",
+  "stt-empty": "Sorry, I didn't catch that. Tap the screen and try again.",
+  network: "Connection trouble. Please try again in a moment.",
+  tts: "Couldn't play the voice response.",
 };
 
 // ---------------------------------------------------------------------------
@@ -267,6 +267,7 @@ export class KioskController {
     this.view.clearErrorBanner();
     this.setState("listening");
     this.view.showListeningIndicator();
+    this.renderer.playListening();
     this.stt.start();
   }
 

@@ -18,7 +18,9 @@ from enum import StrEnum
 # Each named value maps to exactly one expression/motion of the 2D character.
 # ---------------------------------------------------------------------------
 EMOTIONS: frozenset[str] = frozenset({"happy", "neutral", "surprised", "sad", "angry"})
-GESTURES: frozenset[str] = frozenset({"wave", "idle", "point", "nod", "think"})
+GESTURES: frozenset[str] = frozenset(
+    {"wave", "idle", "point", "nod", "think", "fly", "jump", "approach"}
+)
 
 DEFAULT_EMOTION: str = "neutral"
 DEFAULT_GESTURE: str = "idle"
