@@ -125,6 +125,34 @@ async def handle_transcript(
     # the behavior is unchanged.
     products = data_store.list_products(store_id) if store_id else []
     qa_entries = data_store.list_qa(store_id) if store_id else []
+
+    # Familiar question -> answer straight from the curated table, no LLM call.
+    # Only a confident, near-identical match short-circuits (Retrieval.best_qa_match
+    # is deliberately conservative); anything else still goes through generation
+    # below, with the top-k curated entries injected as reference material.
+    direct_match = retrieval.best_qa_match(transcript, qa_entries) if qa_entries else None
+    if direct_match is not None:
+        text = direct_match.answer.get(language) or direct_match.answer.get("en") or ""
+        if text:
+            safe = profanity.apply(
+                CharacterResponse(
+                    text=text,
+                    emotion="happy",
+                    gesture="nod",
+                    matched_qa_id=direct_match.id,
+                )
+            )
+            completed_at = now()
+            data_store.record_turn(transcript, safe.text, completed_at)
+            session.add_turn(
+                ConversationTurn(
+                    customer_text=transcript,
+                    character_text=safe.text,
+                    completed_at=completed_at,
+                )
+            )
+            return safe
+
     # Retrieve only the most relevant curated answers so the prompt stays focused as
     # the Q&A table grows (top-k; a no-op ordering for small tables).
     if qa_entries:

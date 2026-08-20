@@ -137,6 +137,20 @@ def _entry_text(entry: QAEntry) -> str:
     return " ".join([entry.question, *entry.aliases]).strip()
 
 
+def _rank(
+    question: str, entries: list[QAEntry], embedder: Embedder | None
+) -> list[tuple[QAEntry, float]]:
+    """Score every entry against ``question``, most similar first."""
+    embedder = embedder or get_embedder()
+    vectors = embedder.embed([question, *(_entry_text(entry) for entry in entries)])
+    question_vec, entry_vecs = vectors[0], vectors[1:]
+    return sorted(
+        zip(entries, (_cosine(question_vec, vec) for vec in entry_vecs)),
+        key=lambda pair: pair[1],
+        reverse=True,
+    )
+
+
 def select_relevant_qa(
     question: str,
     entries: list[QAEntry],
@@ -154,14 +168,38 @@ def select_relevant_qa(
     """
     if not entries:
         return []
-    embedder = embedder or get_embedder()
-    vectors = embedder.embed([question, *(_entry_text(entry) for entry in entries)])
-    question_vec, entry_vecs = vectors[0], vectors[1:]
-    scored = sorted(
-        zip(entries, (_cosine(question_vec, vec) for vec in entry_vecs)),
-        key=lambda pair: pair[1],
-        reverse=True,
-    )
+    scored = _rank(question, entries, embedder)
     top = scored[:k]
     above = [entry for entry, score in top if score >= min_score]
     return above or [entry for entry, _ in top]
+
+
+# Similarity floor for answering straight from the curated table, skipping the LLM
+# call entirely. Deliberately high: the default HashingEmbedder is lexical (word +
+# trigram overlap), so this only fires for near-identical phrasing or a matching
+# alias, not loose paraphrases with different vocabulary (those still score low and
+# correctly fall through to generation). Overridable via QA_DIRECT_MATCH_MIN_SCORE
+# so a deployment using the semantic `fastembed` backend can tune it separately.
+DIRECT_MATCH_MIN_SCORE: float = float(
+    os.environ.get("QA_DIRECT_MATCH_MIN_SCORE") or 0.78
+)
+
+
+def best_qa_match(
+    question: str,
+    entries: list[QAEntry],
+    *,
+    embedder: Embedder | None = None,
+    min_score: float = DIRECT_MATCH_MIN_SCORE,
+) -> QAEntry | None:
+    """Return the single best-matching entry when it's a confident, direct hit.
+
+    Used to answer familiar questions straight from the curated Q&A table without
+    spending an LLM call — only unfamiliar/ambiguous questions (below ``min_score``)
+    should fall through to generation. Returns ``None`` when ``entries`` is empty or
+    no entry clears ``min_score``.
+    """
+    if not entries:
+        return None
+    top_entry, top_score = _rank(question, entries, embedder)[0]
+    return top_entry if top_score >= min_score else None

@@ -9,11 +9,11 @@ import json
 import websockets
 
 QUESTIONS = [
-    "이 망고에 뭐가 들어가요?",
-    "수박은 얼마나 매워요?",
-    "할랄 음식인가요?",
-    "카드로 결제할 수 있나요?",
-    "고수 들어간 거 있어요?",   # 메뉴에 없는 질문 → 생성/사장님 호출 유도
+    "What's in this mango?",
+    "How spicy is the watermelon?",
+    "Is this halal?",
+    "Can I pay by card?",
+    "Does anything have cilantro in it?",   # not on the menu -> generation/escalation
 ]
 
 URL = "ws://127.0.0.1:8000/ws"

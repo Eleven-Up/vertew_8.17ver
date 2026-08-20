@@ -211,6 +211,13 @@ LOCAL_API_KEY_ENV: str = "LOCAL_LLM_API_KEY"
 DEFAULT_LOCAL_BASE_URL: str = "http://localhost:11434/v1"
 DEFAULT_LOCAL_MODEL: str = "qwen2.5:1.5b-instruct"
 
+# Groq (OpenAI-compatible Chat Completions, cloud, requires a key from console.groq.com).
+GROQ_API_KEY_ENV: str = "GROQ_API_KEY"
+GROQ_BASE_URL_ENV: str = "GROQ_BASE_URL"
+GROQ_MODEL_ENV: str = "GROQ_MODEL"
+DEFAULT_GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
+DEFAULT_GROQ_MODEL: str = "openai/gpt-oss-120b"
+
 
 class GeminiUnavailableError(RuntimeError):
     """Raised when every Gemini Flash attempt fails or times out.
@@ -304,6 +311,7 @@ class OpenAICompatibleClient:
         require_api_key: bool = True,
         path: str = "/chat/completions/",
         api_key_env: str = FACTCHAT_API_KEY_ENV,
+        extra_payload: dict | None = None,
     ) -> None:
         self._api_key = (
             api_key if api_key is not None else os.environ.get(api_key_env)
@@ -318,6 +326,10 @@ class OpenAICompatibleClient:
         # A local server (Ollama / llama.cpp) needs no auth; a cloud gateway does.
         self._require_api_key = require_api_key
         self._path = path if path.startswith("/") else f"/{path}"
+        # Provider-specific extra fields merged into every request payload (e.g.
+        # Groq's `reasoning_effort` for gpt-oss models, to keep hidden reasoning
+        # tokens from eating the max_tokens budget and the per-minute token quota).
+        self._extra_payload = extra_payload or {}
         # Reused across calls so subsequent requests skip the TLS/connection setup
         # cost; created lazily on first use inside the event loop.
         self._http = None  # type: ignore[var-annotated]
@@ -345,6 +357,7 @@ class OpenAICompatibleClient:
             # Cap generation so worst-case latency stays bounded (Req 4.2 keeps the
             # text short anyway); the prompt also asks for 1-2 short sentences.
             "max_tokens": 2048,
+            **self._extra_payload,
         }
 
         response = await self._http.post(url, headers=headers, json=payload)
@@ -376,6 +389,7 @@ def build_client_for_provider(provider: str) -> GeminiClient:
     """Construct the LLM client for a provider name (pure factory, no caching).
 
     - ``factchat``: OpenAI-compatible CNU API Gateway (cloud, requires a key).
+    - ``groq``: OpenAI-compatible Groq Cloud API (cloud, requires a key).
     - ``local``: OpenAI-compatible local server — Ollama or llama.cpp's
       llama-server — for a fully-offline, on-device model. No API key required.
     - anything else (default): Google Gemini directly.
@@ -383,6 +397,20 @@ def build_client_for_provider(provider: str) -> GeminiClient:
     if provider == "factchat":
         logger.info("LLM provider: factchat (CNU API Gateway)")
         return OpenAICompatibleClient()
+    if provider == "groq":
+        model = os.environ.get(GROQ_MODEL_ENV) or DEFAULT_GROQ_MODEL
+        base_url = os.environ.get(GROQ_BASE_URL_ENV) or DEFAULT_GROQ_BASE_URL
+        logger.info("LLM provider: groq (%s, model=%s)", base_url, model)
+        return OpenAICompatibleClient(
+            model=model,
+            base_url=base_url,
+            path="/chat/completions",
+            api_key_env=GROQ_API_KEY_ENV,
+            # gpt-oss models on Groq spend hidden "reasoning" tokens before the
+            # visible content; "low" keeps that spend small so the JSON reply
+            # fits inside max_tokens and free-tier per-minute token quota.
+            extra_payload={"reasoning_effort": "low"},
+        )
     if provider == "local":
         base_url = os.environ.get(LOCAL_BASE_URL_ENV) or DEFAULT_LOCAL_BASE_URL
         model = os.environ.get(LOCAL_MODEL_ENV) or DEFAULT_LOCAL_MODEL
