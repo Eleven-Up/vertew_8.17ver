@@ -136,10 +136,12 @@ def format_qa_knowledge(entries: list[QAEntry], language: str = "en") -> str:
 def format_menu_knowledge(products: list[Product], language: str = "en") -> str:
     """Render the available products into a localized menu-knowledge block.
 
-    Only ``available`` products are included. Each line carries the localized name
-    and description, the price, the spice level in words, the ingredients, and the
-    allergens (or a "none declared" marker). Returns an empty string when there is
-    nothing to describe so callers can omit the section entirely.
+    Only ``available`` products are included. Each line carries the catalog id in
+    brackets (so the model can reference it in ``order_items``, mirroring how
+    ``format_qa_knowledge`` brackets QA ids), the localized name and description,
+    the price, the spice level in words, the ingredients, and the allergens (or a
+    "none declared" marker). Returns an empty string when there is nothing to
+    describe so callers can omit the section entirely.
 
     The output is deterministic (products in catalog order, no timestamps), so it is
     safe to include in a cached prompt and straightforward to test.
@@ -165,7 +167,7 @@ def format_menu_knowledge(products: list[Product], language: str = "en") -> str:
             detail += f' {labels["ingredients"]}: {ingredients}.'
         detail += f' {labels["allergens"]}: {allergens}.'
 
-        prefix = f"- {name}"
+        prefix = f"- [{product.id}] {name}"
         if description:
             prefix += f" — {description}."
         else:
@@ -255,6 +257,14 @@ def build(
         '  - "action": either "answer" (default) or "call_owner".\n'
         '  - "matched_qa_id": the id of the KNOWN ANSWER you used (for example '
         '"qa_hours"), or null.\n'
+        '  - "order_items": include this ONLY when the customer\'s message just now '
+        "clearly asks to order one or more specific MENU items (with or without a "
+        "quantity). An array of objects, each "
+        '{"product_id": <the bracketed id from MENU, e.g. "mango">, "quantity": '
+        "<a positive integer; use 1 if no quantity was said>}. Only the item(s) "
+        "ordered in THIS message, not earlier turns. Omit this field entirely (or "
+        "use an empty array) when nothing was ordered in this message -- a question "
+        "about a product is not an order.\n"
         "- Answer questions about the store using only the information above (the "
         "KNOWN ANSWERS and the MENU). When a KNOWN ANSWER fits the question, use it "
         "and set matched_qa_id to its id. When you answer from MENU facts, set "

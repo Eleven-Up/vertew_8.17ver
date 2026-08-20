@@ -34,6 +34,7 @@ from typing import Protocol
 
 from models import (
     CharacterResponse,
+    OrderItemDelta,
     normalize_emotion,
     normalize_gesture,
 )
@@ -143,6 +144,7 @@ def parse(raw: RawResponse) -> CharacterResponse:
     action = raw_action if raw_action in {"answer", "call_owner"} else "answer"
     raw_matched = data.get("matched_qa_id")
     matched_qa_id = raw_matched if _is_non_empty_str(raw_matched) else None
+    order_items = _parse_order_items(data.get("order_items"))
 
     return CharacterResponse(
         text=text[:MAX_TEXT_LENGTH],
@@ -151,7 +153,32 @@ def parse(raw: RawResponse) -> CharacterResponse:
         is_fallback=False,
         action=action,
         matched_qa_id=matched_qa_id,
+        order_items=order_items,
     )
+
+
+def _parse_order_items(raw: object) -> tuple[OrderItemDelta, ...]:
+    """Defensively extract ``order_items`` from the parsed JSON.
+
+    Anything not shaped like a list of ``{"product_id": str, "quantity": int}``
+    objects is dropped rather than raising -- a malformed/missing order_items
+    field degrades to "nothing ordered this turn", never to FALLBACK_UNDERSTAND
+    (the field is optional; only text/emotion/gesture are required).
+    """
+    if not isinstance(raw, list):
+        return ()
+    items: list[OrderItemDelta] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        product_id = entry.get("product_id")
+        if not _is_non_empty_str(product_id):
+            continue
+        quantity = entry.get("quantity", 1)
+        if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
+            quantity = 1
+        items.append(OrderItemDelta(product_id, quantity))
+    return tuple(items)
 
 
 # ---------------------------------------------------------------------------

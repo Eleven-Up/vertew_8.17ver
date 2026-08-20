@@ -1,14 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { createOrder, createSession, getMenu, getOrder, getSession, setLanguage } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { checkoutDraft, createSession, getDraft, getOrder, getSession, setLanguage, updateDraft } from "./api";
 import { copy } from "./i18n";
-import type { Cart, Language, Order, Product, Session } from "./types";
+import type { Draft, Language, Order, Session } from "./types";
 
-type Screen = "menu" | "cart" | "confirm" | "paying" | "complete";
+// The customer orders by talking to Vertew; this page is reached by scanning
+// the payment QR Vertew shows once it recognizes an order, and only reviews +
+// edits (quantity/remove) + pays that draft -- it never lets the customer
+// browse the full menu, by design (ordering happens through the conversation).
+type Screen = "review" | "paying" | "complete";
 
 // No real payment gateway is wired up (mock/demo payment): a brief simulated
-// processing delay stands in for a card/QR-pay charge before the order is
-// actually created, so the flow reads as "pay -> order placed" to the customer.
+// processing delay stands in for a card/QR-pay charge before the draft is
+// actually turned into a real order.
 const MOCK_PAYMENT_DELAY_MS = 900;
+
+// How often to re-fetch the draft while reviewing, since Vertew can keep
+// recognizing new items by voice while this page stays open on the customer's
+// phone -- there's no live push for the draft itself (unlike order-ready).
+const DRAFT_POLL_MS = 2000;
 
 const fruitEmoji: Record<string, string> = {
   watermelon: "🍉", mango: "🥭", banana: "🍌", apple: "🍎",
@@ -28,12 +37,15 @@ function storeWsUrl(storeId: string, sessionId: string): string {
   return `${protocol}//${window.location.host}/ws/store/${storeId}?client=customer&session_id=${encodeURIComponent(sessionId)}`;
 }
 
+function draftTotal(draft: Draft): number {
+  return draft.items.reduce((sum, item) => sum + item.unit_price_minor * item.quantity, 0);
+}
+
 export function App() {
   const storeId = storeIdFromPath();
   const [session, setSession] = useState<Session | null>(null);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [cart, setCart] = useState<Cart>({});
-  const [screen, setScreen] = useState<Screen>("menu");
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [screen, setScreen] = useState<Screen>("review");
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(true);
@@ -42,19 +54,12 @@ export function App() {
 
   const language = session?.language ?? "en";
   const t = copy(language);
-  const selectedProducts = useMemo(
-    () => products.filter((product) => (cart[product.id] ?? 0) > 0),
-    [cart, products],
-  );
-  const count = Object.values(cart).reduce((sum, quantity) => sum + quantity, 0);
-  const total = selectedProducts.reduce(
-    (sum, product) => sum + product.price_minor * cart[product.id], 0,
-  );
 
   useEffect(() => {
     void bootstrap();
   }, []);
 
+  // Live "order ready" push (unaffected by the payment-flow change above).
   useEffect(() => {
     if (!session) return;
     let disposed = false;
@@ -90,6 +95,22 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [order?.id]);
 
+  // Keep the draft in sync while reviewing -- Vertew may still be recognizing
+  // items by voice even after the customer opens this page.
+  useEffect(() => {
+    if (!session || screen !== "review") return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const latest = await getDraft(session.id);
+        if (!cancelled) setDraft(latest);
+      } catch { /* Keep showing the last known draft; retried on the next tick. */ }
+    };
+    void load();
+    const timer = window.setInterval(load, DRAFT_POLL_MS);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [session?.id, screen]);
+
   async function bootstrap() {
     setBusy(true);
     setError("");
@@ -105,24 +126,31 @@ export function App() {
       }
       params.set("session", activeSession.id);
       window.history.replaceState({}, "", `${window.location.pathname}?${params}`);
-      const menu = await getMenu(storeId);
       setSession(activeSession);
-      setProducts(menu.filter((product) => product.available));
+      setDraft(await getDraft(activeSession.id));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not load the menu");
+      setError(reason instanceof Error ? reason.message : "Could not load your order");
     } finally {
       setBusy(false);
     }
   }
 
-  function changeQuantity(productId: string, delta: number) {
-    setCart((current) => {
-      const next = Math.max(0, (current[productId] ?? 0) + delta);
-      const updated = { ...current };
-      if (next === 0) delete updated[productId];
-      else updated[productId] = next;
-      return updated;
-    });
+  async function changeQuantity(productId: string, delta: number) {
+    if (!session || !draft) return;
+    const nextItems = draft.items
+      .map((item) => (item.product_id === productId ? { ...item, quantity: item.quantity + delta } : item))
+      .filter((item) => item.quantity > 0);
+    setDraft({ ...draft, items: nextItems, total_minor: draftTotal({ ...draft, items: nextItems }) }); // optimistic
+    try {
+      setDraft(await updateDraft(session.id, nextItems.map((item) => ({ product_id: item.product_id, quantity: item.quantity }))));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update your order");
+    }
+  }
+
+  function removeItem(productId: string) {
+    if (!draft) return;
+    void changeQuantity(productId, -(draft.items.find((item) => item.product_id === productId)?.quantity ?? 0));
   }
 
   async function changeLanguage(language: Language) {
@@ -134,14 +162,8 @@ export function App() {
     }
   }
 
-  function orderNow(productId: string) {
-    setCart({ [productId]: 1 });
-    setScreen("confirm");
-    window.scrollTo(0, 0);
-  }
-
-  async function payAndSubmit() {
-    if (!session || selectedProducts.length === 0) return;
+  async function payAndCheckout() {
+    if (!session || !draft || draft.items.length === 0) return;
     setError("");
     setScreen("paying");
     window.scrollTo(0, 0);
@@ -149,14 +171,13 @@ export function App() {
     // actual charge rather than an instant, unconvincing jump to "complete".
     await new Promise((resolve) => setTimeout(resolve, MOCK_PAYMENT_DELAY_MS));
     try {
-      const created = await createOrder(storeId, session, cart);
+      const created = await checkoutDraft(session.id);
       setOrder(created);
       setScreen("complete");
-      setCart({});
       window.scrollTo(0, 0);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not place the order");
-      setScreen("confirm");
+      setScreen("review");
     }
   }
 
@@ -195,31 +216,28 @@ export function App() {
 
       {error && <div className="error-banner" role="alert">{error}</div>}
 
-      {screen === "menu" && <>
-        <section className="hero"><span>FRESH</span><h1>{t.fresh}</h1><p>Watermelon · Mango · Banana · Apple</p></section>
-        <main className="product-grid">
-          {products.map((product) => <article className="product-card" key={product.id}>
-            <div className="fruit" aria-hidden="true">{fruitEmoji[product.id] ?? "🍏"}</div>
-            <div className="product-copy"><h2>{product.name[language]}</h2><p>{product.description[language]}</p><strong>{money(product.price_minor)}</strong></div>
-            <div className="product-actions">
-              <button className="secondary" onClick={() => changeQuantity(product.id, 1)}>{t.add}</button>
-              <button onClick={() => orderNow(product.id)}>{t.orderNow}</button>
-            </div>
-          </article>)}
-        </main>
-      </>}
-
-      {(screen === "cart" || screen === "confirm") && <main className="order-panel">
-        <button className="back" onClick={() => setScreen(screen === "cart" ? "menu" : count > 1 ? "cart" : "menu")}>← {t.back}</button>
-        <h1>{screen === "confirm" ? t.confirm : t.cart}</h1>
-        {selectedProducts.length === 0 ? <p className="empty">{t.empty}</p> : selectedProducts.map((product) =>
-          <div className="cart-row" key={product.id}>
-            <span className="cart-fruit">{fruitEmoji[product.id]}</span>
-            <div><strong>{product.name[language]}</strong><small>{money(product.price_minor)} {t.each}</small></div>
-            {screen === "cart" ? <div className="stepper"><button onClick={() => changeQuantity(product.id, -1)}>−</button><b>{cart[product.id]}</b><button onClick={() => changeQuantity(product.id, 1)}>+</button></div> : <b>× {cart[product.id]}</b>}
-          </div>)}
-        <div className="total"><span>{t.total}</span><strong>{money(total)}</strong></div>
-        {screen === "cart" ? <button className="wide" disabled={!count} onClick={() => setScreen("confirm")}>{t.place}</button> : <button className="wide" disabled={!count} onClick={() => void payAndSubmit()}>{t.pay}</button>}
+      {screen === "review" && <main className="order-panel">
+        <h1>{t.yourOrder}</h1>
+        {!draft || draft.items.length === 0 ? (
+          <p className="empty">{t.noDraftYet}</p>
+        ) : (
+          <>
+            {draft.items.map((item) => (
+              <div className="cart-row" key={item.product_id}>
+                <span className="cart-fruit">{fruitEmoji[item.product_id] ?? "🍏"}</span>
+                <div><strong>{item.name[language] ?? item.name.en}</strong><small>{money(item.unit_price_minor)} {t.each}</small></div>
+                <div className="stepper">
+                  <button onClick={() => void changeQuantity(item.product_id, -1)}>−</button>
+                  <b>{item.quantity}</b>
+                  <button onClick={() => void changeQuantity(item.product_id, 1)}>+</button>
+                </div>
+                <button className="remove" aria-label="Remove" onClick={() => removeItem(item.product_id)}>✕</button>
+              </div>
+            ))}
+            <div className="total"><span>{t.total}</span><strong>{money(draftTotal(draft))}</strong></div>
+            <button className="wide" onClick={() => void payAndCheckout()}>{t.pay}</button>
+          </>
+        )}
       </main>}
 
       {screen === "paying" && <main className="center">
@@ -229,8 +247,6 @@ export function App() {
       {screen === "complete" && order && <main className="complete">
         <div className="check">✓</div><h1>{t.paid}</h1><p>{t.complete}</p><p>{t.number}</p><div className="order-number">#{order.order_number}</div><p>{t.wait}<br/>{t.notify}</p>
       </main>}
-
-      {screen === "menu" && <button className="cart-button" onClick={() => setScreen("cart")}><span>🛒</span>{t.cart}<b>{count}</b></button>}
     </div>
   );
 }

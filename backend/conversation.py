@@ -89,6 +89,7 @@ async def handle_transcript(
     language: str = "en",
     local_on_unavailable: bool = False,
     store_id: str | None = None,
+    customer_session_id: str | None = None,
     now: Callable[[], datetime] = _utcnow,
 ) -> CharacterResponse:
     """Run one Conversation_Turn from transcript to character response.
@@ -109,6 +110,9 @@ async def handle_transcript(
         session: In-memory recent-turn history for the prompt window.
         llm_client: Optional Gemini HTTP boundary; defaults to the shared client.
             Tests inject a mock to exercise the success and network-failure paths.
+        customer_session_id: The commerce CustomerSession id (distinct from
+            ``session``, the in-memory chat history) whose draft order gets any
+            items the LLM recognized from this transcript merged into it.
         now: Callable returning the completion timestamp; injectable for tests.
 
     Returns:
@@ -195,6 +199,17 @@ async def handle_transcript(
             completed_at=completed_at,
         )
     )
+
+    # Items the customer just ordered by voice: merge into their draft order (the
+    # payment-page QR is what turns this into a real, vendor-visible Order). Needs
+    # a known customer_session_id -- e.g. a raw /ws connection with no session_id
+    # query param has nowhere to attach a draft, so this is skipped rather than
+    # erroring.
+    if safe.order_items and customer_session_id:
+        data_store.merge_draft_items(
+            customer_session_id,
+            [(item.product_id, item.quantity) for item in safe.order_items],
+        )
 
     # Learning loop: when the assistant generated an answer that did not come from a
     # curated QA entry (and was neither a fallback nor an escalation), capture it as

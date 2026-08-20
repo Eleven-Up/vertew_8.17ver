@@ -208,6 +208,7 @@ async def conversation_ws(websocket: WebSocket) -> None:
                 session=session,
                 language=customer_session.language if customer_session else "en",
                 store_id=customer_session.store_id if customer_session else "demo",
+                customer_session_id=session_id,
                 local_on_unavailable=True,
             )
             # Human escalation: the assistant asked to fetch the vendor (question not
@@ -223,6 +224,13 @@ async def conversation_ws(websocket: WebSocket) -> None:
                         "language": customer_session.language if customer_session else "en",
                     },
                     session_id=session_id,
+                )
+            # The customer just ordered something by voice: reveal the payment QR
+            # (same event the kiosk already reacts to for the "purchase intent"
+            # debug/analyze-transcript path) so they can scan it to review and pay.
+            if getattr(response, "order_items", ()) and session_id and customer_session:
+                await manager.broadcast(
+                    customer_session.store_id, "show_qr", {"reason": "order_items"}, session_id=session_id
                 )
             await websocket.send_json(_response_payload(response))
     except WebSocketDisconnect:

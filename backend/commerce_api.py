@@ -52,6 +52,10 @@ class OrderStatusUpdate(BaseModel):
     status: OrderStatus
 
 
+class DraftItemsUpdate(BaseModel):
+    items: list[OrderItemCreate]
+
+
 def _payload(value):
     return asdict(value)
 
@@ -107,6 +111,69 @@ async def update_language(session_id: str, body: LanguageUpdate, store: DataStor
             session_id=session.id,
         )
     return _payload(session)
+
+
+def _resolve_draft(session_id: str, store: DataStore) -> dict:
+    """Shared by GET/PATCH draft: resolve the session's draft item ids against
+    the product catalog into the priced view the payment page renders."""
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    product_map = {product.id: product for product in store.list_products(session.store_id)}
+    items = store.get_draft_items(session_id)
+    resolved = []
+    total = 0
+    for product_id, quantity in items.items():
+        product = product_map.get(product_id)
+        if product is None:
+            continue  # stale/removed product id -- skip rather than error
+        resolved.append({
+            "product_id": product_id,
+            "quantity": quantity,
+            "name": product.name,
+            "unit_price_minor": product.price_minor,
+        })
+        total += product.price_minor * quantity
+    return {"session_id": session_id, "items": resolved, "total_minor": total, "currency": "MYR"}
+
+
+@router.get("/sessions/{session_id}/draft")
+def get_draft(session_id: str, store: DataStore = Depends(get_data_store)) -> dict:
+    """The customer's in-progress order, as recognized so far from the voice
+    conversation (or edited on the payment page) -- not yet paid/vendor-visible."""
+    return _resolve_draft(session_id, store)
+
+
+@router.patch("/sessions/{session_id}/draft")
+def update_draft(
+    session_id: str, body: DraftItemsUpdate, store: DataStore = Depends(get_data_store)
+) -> dict:
+    """Payment-page quantity/remove edits: an absolute replace of the draft
+    (omit an item entirely to remove it), not a delta."""
+    if store.get_session(session_id) is None:
+        raise HTTPException(404, "Session not found")
+    store.set_draft_items(session_id, {item.product_id: item.quantity for item in body.items})
+    return _resolve_draft(session_id, store)
+
+
+@router.post("/sessions/{session_id}/draft/checkout", status_code=201)
+async def checkout_draft(session_id: str, store: DataStore = Depends(get_data_store)):
+    """Mock payment: turn the draft into a real order (vendor-visible, gets an
+    order number) and broadcast it exactly like a directly-placed order."""
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    try:
+        order = store.checkout_draft(session.store_id, session_id, session.language)
+    except ValueError:
+        raise HTTPException(409, "Nothing to pay for -- the draft order is empty") from None
+    except KeyError as exc:
+        raise HTTPException(404, str(exc.args[0])) from None
+    payload = _payload(order)
+    await manager.broadcast(
+        order.store_id, "new_order", payload, session_id=order.session_id
+    )
+    return payload
 
 
 @router.post("/orders", status_code=201)
