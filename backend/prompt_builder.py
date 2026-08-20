@@ -98,6 +98,13 @@ def _localized(values: dict[str, str] | None, language: str) -> str:
     return values.get(language) or values.get("en") or next(iter(values.values()), "")
 
 
+# Human-readable language names for the reply-language lock in the fixed
+# instructions (see build()). The model is told the name explicitly instead of
+# being left to (mis)infer the reply language from the transcript alone, which
+# some providers get wrong even on plain, unambiguous input.
+_LANGUAGE_NAMES: dict[str, str] = {"en": "English", "ko": "Korean", "ms": "Malay"}
+
+
 # Curated Q&A block header per language (see format_qa_knowledge).
 _QA_HEADER: dict[str, str] = {
     "en": (
@@ -187,6 +194,7 @@ def build(
     store_info: StoreInfo | None,
     recent_turns: list[ConversationTurn],
     transcript: str,
+    language: str = "en",
 ) -> str:
     """Assemble the Gemini prompt for a single Conversation_Turn.
 
@@ -196,6 +204,13 @@ def build(
         recent_turns: The Conversation_Turn history; clamped here to the five most
             recent turns in chronological order (Req 3.2).
         transcript: The customer's latest utterance transcript.
+        language: The customer session's current confirmed language (``"en"``,
+            ``"ko"``, or ``"ms"``), tracked separately by Intent_Analyzer across
+            turns (see intent.py). Passed through explicitly so the model is told
+            which language to reply in, rather than having to (re-)infer it from
+            this one transcript alone -- some providers drift into a different
+            language mid-conversation on plain, unambiguous input when left to
+            infer it themselves.
 
     Returns:
         A single prompt string containing the persona, store/product information,
@@ -244,8 +259,16 @@ def build(
     sections.append(f"CUSTOMER MESSAGE:\n{transcript}")
 
     # --- Fixed instructions (Req 3.4, 3.5, 10.3, 10.4) -------------------
+    language_name = _LANGUAGE_NAMES.get(language, "English")
     instructions = (
         "INSTRUCTIONS:\n"
+        f"- The customer's conversation language is {language_name} ({language}). "
+        f'Write the "text" field ONLY in {language_name}, in every reply, with no '
+        "words from any other language mixed in -- even if the customer message "
+        "above contains foreign words, a mangled or unclear phrase, or a brand/"
+        "product name you don't recognize. If you are ever unsure what the "
+        f"customer meant, ask for clarification, but still do this in {language_name} "
+        "only.\n"
         "- Respond with exactly one JSON object and nothing else.\n"
         "- The JSON object must contain these fields:\n"
         f'  - "text": a non-empty string of at most {MAX_TEXT_CHARS} characters.\n'
@@ -277,7 +300,6 @@ def build(
         "information. If the information above does not cover the question, or the "
         "question is about an allergy or health concern you cannot confirm from it, "
         'set "action" to "call_owner" and tell the customer you will call the owner.\n'
-        "- Reply in the same language the customer used in their message.\n"
         "- Keep the reply to 1-2 short, friendly sentences.\n"
         "- Write the text at a grade-8 reading level or below, using plain "
         "conversational vocabulary.\n"
