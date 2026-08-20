@@ -4,21 +4,47 @@ Target hardware: Raspberry Pi 5 (4GB), 64-bit Raspberry Pi OS with Desktop. This
 branch (`feat/raspberry-pi`) carries the Pi-tuned config; the app code itself is
 identical to the PC/browser branch.
 
-## 1. Get the code and dependencies onto the Pi
+## Quick start: one command
 
 ```bash
-git clone <this repo> /opt/vertew
-cd /opt/vertew/backend
+git clone <this repo> vertew && cd vertew
+git checkout feat/raspberry-pi
+./scripts/install.sh
+```
+
+That sets up the backend venv + dependencies, builds the frontend (or tells you
+what to copy over if Node isn't on the Pi), creates `backend/.env` from the
+example if it's missing, and installs + enables the systemd services and the
+kiosk autostart entry. **After this, Vertew starts automatically on every
+boot -- no manual step, no script to run by hand.** (There's no ".exe"
+equivalent on Linux; this script *is* the one-file "just run it" version.)
+
+Two things it can't do for you:
+
+- **Add your LLM API key.** Open `backend/.env` afterward and fill in
+  `GROQ_API_KEY` (or whichever `LLM_PROVIDER` you're using).
+- **64-bit OS.** `faster-whisper`'s `ctranslate2` dependency only ships
+  prebuilt wheels for 64-bit ARM; on 32-bit Raspberry Pi OS the install would
+  need to compile from source (slow/unreliable on a Pi). Re-flash with the
+  64-bit image first if unsure.
+
+Re-running `install.sh` later (e.g. after `git pull`) is safe -- every step
+checks before it acts.
+
+## What it does, if you want to do any of it by hand
+
+<details>
+<summary>Manual steps (click to expand)</summary>
+
+### 1. Backend venv + dependencies
+
+```bash
+cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-`faster-whisper`'s `ctranslate2` dependency needs a **64-bit** OS to install from
-a prebuilt wheel; on 32-bit Raspberry Pi OS it has no wheel and would need to
-compile from source (slow/unreliable on a Pi). If you're on 32-bit, re-flash with
-the 64-bit image first.
-
-## 2. Build the frontend once
+### 2. Build the frontend once
 
 `frontend/js/main.js`/`mock.js` are the esbuild output and are gitignored, so
 they don't ship in the repo. Either:
@@ -27,7 +53,7 @@ they don't ship in the repo. Either:
 - Build on your dev machine and `scp` `frontend/js/main.js` and `frontend/js/mock.js`
   over, so the Pi never needs Node.js installed at all.
 
-## 3. Configure `backend/.env`
+### 3. Configure `backend/.env`
 
 Copy `backend/.env.example` to `backend/.env` and fill in your LLM key
 (`LLM_PROVIDER`/`GROQ_API_KEY` etc.). This branch's example already defaults
@@ -35,7 +61,25 @@ Copy `backend/.env.example` to `backend/.env` and fill in your LLM key
 than a desktop dev machine -- drop to `tiny` if a reply feels slow to arrive,
 or try `small` if the Pi 5 keeps up and you want the accuracy back.
 
-### Pre-seed the Whisper model (optional, avoids relying on Pi Wi-Fi at demo time)
+### 4. Autostart on boot
+
+```bash
+sudo cp scripts/vertew-backend.service.example /etc/systemd/system/vertew-backend.service
+sudo cp scripts/vertew-sensor.service.example /etc/systemd/system/vertew-sensor.service   # optional
+# Edit both: replace /opt/vertew with wherever you actually cloned the repo,
+# and User=pi with your actual username if different.
+sudo systemctl daemon-reload
+sudo systemctl enable --now vertew-backend.service
+sudo systemctl enable --now vertew-sensor.service   # optional
+
+mkdir -p ~/.config/autostart
+cp scripts/vertew-kiosk.desktop.example ~/.config/autostart/vertew-kiosk.desktop
+# same path/username edit here
+```
+
+</details>
+
+## Pre-seed the Whisper model (optional, avoids relying on Pi Wi-Fi at demo time)
 
 faster-whisper downloads its model from Hugging Face Hub on first use (a few
 hundred MB). To avoid needing internet at the actual demo:
@@ -47,7 +91,7 @@ python -c "from faster_whisper import WhisperModel; WhisperModel('base', device=
 scp -r ~/.cache/huggingface pi@<pi-host>:~/.cache/
 ```
 
-## 4. Microphone
+## Microphone
 
 The Pi's onboard 3.5mm jack is output-only on most models -- plug in a USB
 microphone. Confirm it's picked up before wiring anything else:
@@ -56,30 +100,7 @@ microphone. Confirm it's picked up before wiring anything else:
 arecord -l   # should list your USB mic as a capture device
 ```
 
-## 5. Autostart on boot
-
-Two systemd services (`vertew-backend.service.example`, and
-`vertew-sensor.service.example` if the physical distance sensor is wired up) plus
-one XDG autostart entry for the kiosk browser (`vertew-kiosk.desktop.example`).
-
-```bash
-# Backend (and sensor bridge, if used) as systemd services:
-sudo cp scripts/vertew-backend.service.example /etc/systemd/system/vertew-backend.service
-sudo cp scripts/vertew-sensor.service.example /etc/systemd/system/vertew-sensor.service   # optional
-sudo systemctl daemon-reload
-sudo systemctl enable --now vertew-backend.service
-sudo systemctl enable --now vertew-sensor.service   # optional
-
-# Kiosk browser: autostart within the desktop session (works under both LXDE
-# and Wayfire/labwc, since both honor the XDG autostart spec).
-mkdir -p ~/.config/autostart
-cp scripts/vertew-kiosk.desktop.example ~/.config/autostart/vertew-kiosk.desktop
-```
-
-Both `.example` systemd units assume the repo lives at `/opt/vertew` and the
-venv at `/opt/vertew/.venv` -- edit the paths if yours differs.
-
-## 6. One thing that will bite you if skipped
+## One thing that will bite you if skipped
 
 `getUserMedia` (microphone access) only works in a "secure context": `localhost`
 is exempt, but a plain `http://<pi-lan-ip>:8000` is not. This only matters if a
@@ -87,7 +108,7 @@ is exempt, but a plain `http://<pi-lan-ip>:8000` is not. This only matters if a
 Pi's own screen running Chromium against `http://localhost:8000` -- the on-Pi
 kiosk display is unaffected either way.
 
-## 7. Sanity check before the demo
+## Sanity check before the demo
 
 ```bash
 curl -s http://localhost:8000/api/stt/config   # should print {"provider":"local"}
