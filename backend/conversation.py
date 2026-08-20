@@ -174,6 +174,7 @@ async def handle_transcript(
         effective_store_info,
         session.recent_turns(max=MAX_RECENT_TURNS),
         transcript,
+        language,
     )
 
     # Single combined Gemini call (10s timeout, <=1 retry inside complete()).

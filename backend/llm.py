@@ -436,7 +436,11 @@ def build_client_for_provider(provider: str) -> GeminiClient:
             # gpt-oss models on Groq spend hidden "reasoning" tokens before the
             # visible content; "low" keeps that spend small so the JSON reply
             # fits inside max_tokens and free-tier per-minute token quota.
-            extra_payload={"reasoning_effort": "low"},
+            # A low temperature (Groq's default is ~1.0) makes the model follow
+            # the reply-language lock in prompt_builder.build reliably instead of
+            # spontaneously drifting into Korean/Malay mid-conversation on plain
+            # English input, which this model does under the default temperature.
+            extra_payload={"reasoning_effort": "low", "temperature": 0.3},
         )
     if provider == "local":
         base_url = os.environ.get(LOCAL_BASE_URL_ENV) or DEFAULT_LOCAL_BASE_URL
