@@ -44,14 +44,23 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-### 2. Build the frontend once
+### 2. Build the three frontends once
 
-`frontend/js/main.js`/`mock.js` are the esbuild output and are gitignored, so
-they don't ship in the repo. Either:
+Three separate apps, all gitignored build output (esbuild/vite), so none of
+them ship in the repo:
 
-- Build directly on the Pi (needs Node.js): `cd frontend && npm install && npm run build`, or
-- Build on your dev machine and `scp` `frontend/js/main.js` and `frontend/js/mock.js`
-  over, so the Pi never needs Node.js installed at all.
+| App | Path | What it's for |
+|---|---|---|
+| Kiosk_UI | `frontend/` (`js/main.js`, `js/mock.js`) | the hologram/tablet display itself |
+| Customer order page | `apps/customer/` (`dist/`) | what the kiosk's QR code opens |
+| Vendor dashboard | `apps/vendor/` (`dist/`) | order/payment + "call the owner" alerts, opened on the vendor's phone |
+
+For each: either build directly on the Pi (needs Node.js) --
+`(cd frontend && npm install && npm run build)`, `(cd apps/customer && npm install && npm run build)`,
+`(cd apps/vendor && npm install && npm run build)` -- or build on your dev
+machine and `scp` the output (`frontend/js/main.js` + `mock.js`,
+`apps/customer/dist/`, `apps/vendor/dist/`) over, so the Pi never needs
+Node.js installed at all.
 
 ### 3. Configure `backend/.env`
 
@@ -112,8 +121,16 @@ kiosk display is unaffected either way.
 
 ```bash
 curl -s http://localhost:8000/api/stt/config   # should print {"provider":"local"}
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8000/order/store/demo   # should print 200
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8000/vendor            # should print 200
 ```
 
 Then open the kiosk URL, tap the screen, and talk -- a reply should land a
 second or two after you stop speaking (batch transcription, not streaming, so
 some delay after you finish is expected and normal).
+
+On the vendor's phone (same Wi-Fi as the Pi), open
+`http://<pi-lan-ip>:8000/vendor?store=demo` to see live order/payment alerts
+and "call the owner" pings from the conversation AI. The customer-facing order
+page is what the kiosk's on-screen QR code already links to -- nothing extra
+to open there.

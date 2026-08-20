@@ -42,19 +42,37 @@ fi
 cd "${REPO_ROOT}"
 
 # ---------------------------------------------------------------------------
-# 2. Frontend bundle (frontend/js/main.js + mock.js are gitignored build output)
+# 2. Frontend bundles. All three are esbuild/vite build output and gitignored,
+# so none of them ship in the repo -- build on the Pi (needs Node) or scp a
+# prebuilt copy over from your dev machine.
 # ---------------------------------------------------------------------------
-log "Checking frontend bundle"
-if [ -f frontend/js/main.js ] && [ -f frontend/js/mock.js ]; then
-    echo "    frontend/js/main.js and mock.js already present -- skipping build"
-elif command -v npm >/dev/null 2>&1; then
-    (cd frontend && npm install && npm run build)
-else
-    echo "    npm not found on this Pi and the bundle is missing." >&2
-    echo "    Build it on your dev machine and scp frontend/js/main.js + mock.js" >&2
-    echo "    to this same path on the Pi, then re-run this script." >&2
-    exit 1
-fi
+build_or_instruct() {
+    local dir="$1" desc="$2"
+    shift 2
+    local check_files=("$@")
+    local missing=0
+    for f in "${check_files[@]}"; do
+        [ -f "${dir}/${f}" ] || missing=1
+    done
+    if [ "${missing}" -eq 0 ]; then
+        echo "    ${desc}: build output already present -- skipping"
+        return 0
+    fi
+    if command -v npm >/dev/null 2>&1; then
+        log "Building ${desc}"
+        (cd "${dir}" && npm install && npm run build)
+    else
+        echo "    npm not found and ${desc}'s build output is missing." >&2
+        echo "    Build it on your dev machine and scp the result to ${dir} on the Pi," >&2
+        echo "    then re-run this script." >&2
+        exit 1
+    fi
+}
+
+log "Checking frontend bundles (Kiosk_UI, customer order page, vendor dashboard)"
+build_or_instruct frontend "Kiosk_UI" js/main.js js/mock.js
+build_or_instruct apps/customer "customer order page" dist/index.html
+build_or_instruct apps/vendor "vendor dashboard" dist/index.html
 
 # ---------------------------------------------------------------------------
 # 3. systemd services (backend always; sensor bridge only if the hardware for
@@ -108,4 +126,10 @@ To start it right now without rebooting:
 
 Sanity check:
   curl -s http://localhost:8000/api/stt/config   # should print {"provider":"local"}
+  curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8000/order/store/demo   # should print 200
+  curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8000/vendor            # should print 200
+
+The customer order page is what the kiosk's QR code points to; the vendor
+dashboard (order alerts + "call the owner" alerts) is meant to be opened on
+the vendor's own phone at http://<pi-lan-ip>:8000/vendor?store=demo.
 EOF
