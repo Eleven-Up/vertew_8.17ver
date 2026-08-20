@@ -1,0 +1,16 @@
+[Unit]
+Description=Vertew Conversation_Server (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/vertew/backend
+EnvironmentFile=/opt/vertew/backend/.env
+ExecStart=/opt/vertew/.venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=3
+User=pi
+
+[Install]
+WantedBy=multi-user.target

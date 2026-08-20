@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Vertew Kiosk
+Comment=Autostart the Vertew Kiosk_UI in Chromium fullscreen (scripts/kiosk.sh)
+Exec=/opt/vertew/scripts/kiosk.sh
+X-GNOME-Autostart-enabled=true
+NoDisplay=false
+Terminal=false
