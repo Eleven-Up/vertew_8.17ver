@@ -252,7 +252,11 @@ def build(
         f'  - "emotion": exactly one of these lowercase values: '
         f"{_format_allowed_set(EMOTIONS)}.\n"
         f'  - "gesture": exactly one of these lowercase values: '
-        f"{_format_allowed_set(GESTURES)}.\n"
+        f'{_format_allowed_set(GESTURES)}. Use "wave" for greetings, "point" '
+        'when directing attention to a menu item, "nod" for simple agreement, '
+        '"think" when unsure or considering, "jump" or "fly" for excited/'
+        'celebratory moments (a delightful answer, an order just placed), and '
+        '"approach" for a warm welcome. Default to "idle" otherwise.\n'
         "- The JSON object may also include:\n"
         '  - "action": either "answer" (default) or "call_owner".\n'
         '  - "matched_qa_id": the id of the KNOWN ANSWER you used (for example '

@@ -32,8 +32,8 @@ import {
 const ART_BASE = "./assets/character/processed";
 
 /**
- * Maps each Gesture to its full-body pose image. Only `idle`/`wave`/`point`/
- * `nod`/`think` have distinct art; the map is total over {@link GESTURES}.
+ * Maps each Gesture to its full-body pose image. The map is total over
+ * {@link GESTURES}.
  */
 const POSE_IMAGE_SRC: Record<Gesture, string> = {
   idle: `${ART_BASE}/pose_idle.png`,
@@ -41,10 +41,18 @@ const POSE_IMAGE_SRC: Record<Gesture, string> = {
   point: `${ART_BASE}/pose_point.png`,
   nod: `${ART_BASE}/pose_nod.png`,
   think: `${ART_BASE}/pose_think.png`,
+  fly: `${ART_BASE}/pose_fly.png`,
+  jump: `${ART_BASE}/pose_jump.png`,
+  approach: `${ART_BASE}/pose_approach.png`,
 };
 
 /** Beak-open variant of the idle pose, swapped in for lip-sync frames. */
 const POSE_IDLE_TALK_SRC = `${ART_BASE}/pose_idle_talk.png`;
+
+/** Wing-cupped-to-ear pose shown while the mic is actively listening -- a UI
+ * state, not one of the LLM-chosen Gestures, so it's handled separately from
+ * {@link POSE_IMAGE_SRC} (see {@link DomCharacterRenderer.playListening}). */
+const POSE_LISTENING_SRC = `${ART_BASE}/pose_listening.png`;
 
 /**
  * Maps each Emotion to a small floating accent icon, or `null` for `neutral`
@@ -59,15 +67,15 @@ const EMOTION_ACCENT_SRC: Record<Emotion, string | null> = {
 };
 
 /**
- * How long a one-shot gesture pose (wave/point/nod/think) is held before the
- * base art settles back to idle. Chosen to cover the longest gesture's CSS
- * "acting" animation in hologram.css (point: 0.8s x 2 = 1.6s) so the pose
- * reads as a deliberate beat rather than lingering through the whole reply --
- * and, just as importantly, so the `.character-mouth`/`.vertew-eyelid` overlay
+ * How long a one-shot gesture pose (wave/point/nod/think/fly/jump/approach) is
+ * held before the base art settles back to idle. Chosen to cover the longest
+ * gesture's CSS "acting" animation in hologram.css (fly: 1s x 2 = 2s) so the
+ * pose reads as a deliberate beat rather than lingering through the whole
+ * reply -- and, just as importantly, so the `.vertew-eyelid` overlay
  * coordinates (tuned for the idle pose) are correct again for the rest of the
  * turn's lip-sync, since the other pose art shifts the head/beak slightly.
  */
-const GESTURE_HOLD_MS = 1600;
+const GESTURE_HOLD_MS = 2100;
 
 /** DOM id of the character root element expected by {@link createCharacterRenderer}. */
 export const CHARACTER_ROOT_ID = "character";
@@ -106,7 +114,15 @@ export const MOTION_CLASS: Record<Gesture, string> = {
   point: "motion-point",
   nod: "motion-nod",
   think: "motion-think",
+  fly: "motion-fly",
+  jump: "motion-jump",
+  approach: "motion-approach",
 };
+
+/** Class applied to the root while the mic is actively listening -- distinct
+ * from {@link IDLE_LOOP_CLASS} so its pose/motion (see hologram.css) doesn't
+ * fight with the ambient idle loop or a gesture in progress. */
+export const LISTENING_LOOP_CLASS = "character-listening-loop";
 
 const ALL_EXPRESSION_CLASSES: readonly string[] = Object.values(EXPRESSION_CLASS);
 const ALL_MOTION_CLASSES: readonly string[] = Object.values(MOTION_CLASS);
@@ -148,6 +164,8 @@ export interface CharacterRenderer {
   stopLipSync(): void;
   /** Loop the ambient idle animation while no conversation is active (Req 5.3). */
   playIdle(): void;
+  /** Show the attentive "listening" pose while the mic is actively capturing. */
+  playListening(): void;
 }
 
 /**
@@ -180,7 +198,7 @@ export class DomCharacterRenderer implements CharacterRenderer {
    */
   render(emotion: string, gesture: string): void {
     this.idleActive = false;
-    this.root.classList.remove(IDLE_LOOP_CLASS);
+    this.root.classList.remove(IDLE_LOOP_CLASS, LISTENING_LOOP_CLASS);
     const normEmotion = normalizeEmotion(emotion);
     const normGesture = normalizeGesture(gesture);
     this.applyExpression(normEmotion);
@@ -196,11 +214,26 @@ export class DomCharacterRenderer implements CharacterRenderer {
   playIdle(): void {
     this.idleActive = true;
     this.clearPoseRevert();
+    this.root.classList.remove(LISTENING_LOOP_CLASS);
     this.applyExpression(DEFAULT_EMOTION);
     this.applyMotion(DEFAULT_GESTURE);
     this.setEmotionAccent(DEFAULT_EMOTION);
     this.setBaseImage(POSE_IMAGE_SRC[DEFAULT_GESTURE], true);
     this.root.classList.add(IDLE_LOOP_CLASS);
+  }
+
+  /**
+   * Show the wing-cupped-to-ear "listening" pose while the mic is actively
+   * capturing speech -- an intuitive, unmistakable "I'm listening" read,
+   * distinct from the idle loop and from any LLM-chosen Gesture pose.
+   */
+  playListening(): void {
+    this.idleActive = false;
+    this.clearPoseRevert();
+    this.root.classList.remove(IDLE_LOOP_CLASS);
+    this.applyMotion(DEFAULT_GESTURE); // clear any lingering gesture motion class
+    this.setBaseImage(POSE_LISTENING_SRC, true);
+    this.root.classList.add(LISTENING_LOOP_CLASS);
   }
 
   /**
