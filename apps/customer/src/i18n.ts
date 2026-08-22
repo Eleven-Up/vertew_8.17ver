@@ -9,6 +9,7 @@ const messages = {
     loading: "Loading your order…", retry: "Try Again", language: "Language", each: "each",
     readyTitle: "Your order is ready!", readyBody: "Please collect your order at the store.", acknowledge: "OK",
     pay: "Pay Now", paying: "Processing payment…", paid: "Payment received",
+    notePlaceholder: "Special request? e.g. no cilantro",
   },
   ko: {
     fresh: "신선한 과일", yourOrder: "주문 내역",
@@ -18,6 +19,7 @@ const messages = {
     loading: "주문 내역을 불러오고 있어요…", retry: "다시 시도", language: "언어", each: "개당",
     readyTitle: "주문이 준비되었습니다!", readyBody: "매장에서 주문하신 상품을 받아주세요.", acknowledge: "확인",
     pay: "결제하기", paying: "결제 처리 중…", paid: "결제가 완료되었습니다",
+    notePlaceholder: "요청 사항이 있나요? 예: 고수 빼주세요",
   },
   ms: {
     fresh: "Buah-buahan Segar", yourOrder: "Pesanan Anda",
@@ -27,6 +29,7 @@ const messages = {
     loading: "Memuatkan pesanan anda…", retry: "Cuba Lagi", language: "Bahasa", each: "setiap satu",
     readyTitle: "Pesanan anda sudah siap!", readyBody: "Sila ambil pesanan anda di kedai.", acknowledge: "OK",
     pay: "Bayar Sekarang", paying: "Memproses pembayaran…", paid: "Pembayaran berjaya",
+    notePlaceholder: "Ada permintaan khusus? cth. tanpa ketumbar",
   },
 } as const;
 

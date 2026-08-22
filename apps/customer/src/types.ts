@@ -15,6 +15,7 @@ export interface Product {
   spice_level?: number;
   ingredients?: Partial<Record<Language, string>>;
   allergens?: string[];
+  stock_count?: number;
 }
 
 export interface Session {
@@ -39,6 +40,8 @@ export interface Order {
 export interface DraftItem {
   product_id: string;
   quantity: number;
+  // Free-text special request for this item, e.g. "no cilantro please".
+  note: string;
   name: Record<Language, string>;
   unit_price_minor: number;
 }

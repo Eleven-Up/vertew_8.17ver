@@ -36,11 +36,12 @@ export function getDraft(sessionId: string): Promise<Draft> {
   return request(`/api/sessions/${sessionId}/draft`);
 }
 
-// Absolute replace of the draft's quantities (omit an item to remove it) --
-// used by this page's +/-/remove buttons, not by the voice conversation.
+// Absolute replace of the draft's quantities and notes (omit an item to
+// remove it) -- used by this page's +/-/remove buttons and special-request
+// field, not by the voice conversation.
 export function updateDraft(
   sessionId: string,
-  items: { product_id: string; quantity: number }[],
+  items: { product_id: string; quantity: number; note?: string }[],
 ): Promise<Draft> {
   return request(`/api/sessions/${sessionId}/draft`, {
     method: "PATCH",

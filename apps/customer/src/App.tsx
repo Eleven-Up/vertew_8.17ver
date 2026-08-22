@@ -51,6 +51,11 @@ export function App() {
   const [busy, setBusy] = useState(true);
   const [readyOrder, setReadyOrder] = useState<Order | null>(null);
   const dismissedReady = useRef(new Set<string>());
+  // Special-request text the customer is actively typing, keyed by product_id
+  // -- kept separate from `draft` so the 2s background poll (which may bring
+  // back items recognized by voice) never clobbers an in-progress edit before
+  // it's saved on blur.
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
 
   const language = session?.language ?? "en";
   const t = copy(language);
@@ -142,7 +147,7 @@ export function App() {
       .filter((item) => item.quantity > 0);
     setDraft({ ...draft, items: nextItems, total_minor: draftTotal({ ...draft, items: nextItems }) }); // optimistic
     try {
-      setDraft(await updateDraft(session.id, nextItems.map((item) => ({ product_id: item.product_id, quantity: item.quantity }))));
+      setDraft(await updateDraft(session.id, nextItems.map((item) => ({ product_id: item.product_id, quantity: item.quantity, note: item.note }))));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not update your order");
     }
@@ -151,6 +156,24 @@ export function App() {
   function removeItem(productId: string) {
     if (!draft) return;
     void changeQuantity(productId, -(draft.items.find((item) => item.product_id === productId)?.quantity ?? 0));
+  }
+
+  // Persists the special-request text typed for one item once the customer
+  // leaves the field, so a keystroke-per-request round trip isn't needed.
+  async function saveNote(productId: string) {
+    if (!session || !draft) return;
+    const note = noteDrafts[productId] ?? "";
+    const nextItems = draft.items.map((item) => (item.product_id === productId ? { ...item, note } : item));
+    setDraft({ ...draft, items: nextItems });
+    setNoteDrafts((prev) => {
+      const { [productId]: _omit, ...rest } = prev;
+      return rest;
+    });
+    try {
+      setDraft(await updateDraft(session.id, nextItems.map((item) => ({ product_id: item.product_id, quantity: item.quantity, note: item.note }))));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update your order");
+    }
   }
 
   async function changeLanguage(language: Language) {
@@ -223,15 +246,26 @@ export function App() {
         ) : (
           <>
             {draft.items.map((item) => (
-              <div className="cart-row" key={item.product_id}>
-                <span className="cart-fruit">{fruitEmoji[item.product_id] ?? "🍏"}</span>
-                <div><strong>{item.name[language] ?? item.name.en}</strong><small>{money(item.unit_price_minor)} {t.each}</small></div>
-                <div className="stepper">
-                  <button onClick={() => void changeQuantity(item.product_id, -1)}>−</button>
-                  <b>{item.quantity}</b>
-                  <button onClick={() => void changeQuantity(item.product_id, 1)}>+</button>
+              <div className="cart-item" key={item.product_id}>
+                <div className="cart-row">
+                  <span className="cart-fruit">{fruitEmoji[item.product_id] ?? "🍏"}</span>
+                  <div><strong>{item.name[language] ?? item.name.en}</strong><small>{money(item.unit_price_minor)} {t.each}</small></div>
+                  <div className="stepper">
+                    <button onClick={() => void changeQuantity(item.product_id, -1)}>−</button>
+                    <b>{item.quantity}</b>
+                    <button onClick={() => void changeQuantity(item.product_id, 1)}>+</button>
+                  </div>
+                  <button className="remove" aria-label="Remove" onClick={() => removeItem(item.product_id)}>✕</button>
                 </div>
-                <button className="remove" aria-label="Remove" onClick={() => removeItem(item.product_id)}>✕</button>
+                <input
+                  className="cart-note"
+                  type="text"
+                  maxLength={200}
+                  placeholder={t.notePlaceholder}
+                  value={noteDrafts[item.product_id] ?? item.note}
+                  onChange={(event) => setNoteDrafts((prev) => ({ ...prev, [item.product_id]: event.target.value }))}
+                  onBlur={() => void saveNote(item.product_id)}
+                />
               </div>
             ))}
             <div className="total"><span>{t.total}</span><strong>{money(draftTotal(draft))}</strong></div>

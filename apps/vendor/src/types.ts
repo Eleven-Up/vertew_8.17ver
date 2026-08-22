@@ -5,6 +5,8 @@ export interface OrderItem {
   quantity: number;
   product_name: Record<string, string>;
   unit_price_minor: number;
+  // Free-text special request for this item, e.g. "no cilantro please".
+  note: string;
 }
 
 export interface Order {
@@ -43,4 +45,39 @@ export interface VendorCall {
   language: string;
   at: string;
   sessionId: string | null;
+}
+
+// A menu item, as managed on the Menu tab (name/description/price/image/stock).
+// Mirrors backend/models.py Product.
+export interface Product {
+  id: string;
+  store_id: string;
+  name: Record<string, string>;
+  description: Record<string, string>;
+  price_minor: number;
+  currency: string;
+  available: boolean;
+  image: string;
+  spice_level: number;
+  ingredients: Record<string, string>;
+  allergens: string[];
+  stock_count: number;
+  origin: Record<string, string>;
+}
+
+// The vendor menu-editor form submission (create or full-replace one listing).
+export interface ProductWrite {
+  name_en: string;
+  name_ko: string;
+  name_ms: string;
+  description_en: string;
+  description_ko: string;
+  description_ms: string;
+  price_minor: number;
+  image: string;
+  stock_count: number;
+  origin_en: string;
+  origin_ko: string;
+  origin_ms: string;
+  available: boolean;
 }
