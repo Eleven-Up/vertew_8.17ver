@@ -1,7 +1,8 @@
 import QRCode from "qrcode";
-import { createCharacterRenderer } from "./character.js";
+import { createCharacterRenderer, type CharacterRenderer } from "./character.js";
 import { ChatClient, buildWsUrl } from "./chat.js";
 import { createChatLog } from "./chatlog.js";
+import { splitIntoBeats } from "./emotion-cues.js";
 import { analyzeTranscript, createCustomerSession, getActiveOrders, getCustomerSession, getReadyOrders, getSttConfig, EventVideoQueue, loadMediaConfig, StoreEventClient, type BoardOrder, type StoreEvent } from "./hologram.js";
 import { KioskController, createDomKioskView } from "./kiosk.js";
 import { LocalSttProvider, WebSpeechSttProvider, WebSpeechTtsEngine } from "./speech.js";
@@ -16,6 +17,55 @@ const readyCopy: Record<string, (number: number) => string> = {
   ko: (number) => `${number}번 고객님! 주문하신 상품이 준비되었습니다!`,
   ms: (number) => `Pesanan nombor ${number}! Pesanan anda sudah siap!`,
 };
+
+const MOTION_SHOWCASE_MOODS: [string, string][] = [
+  ["neutral", "idle"], ["happy", "idle"], ["sad", "idle"], ["angry", "idle"], ["surprised", "idle"],
+];
+const MOTION_SHOWCASE_GESTURES: [string, string][] = [
+  ["happy", "wave"], ["happy", "point"], ["happy", "nod"], ["neutral", "think"],
+  ["happy", "fly"], ["surprised", "jump"], ["happy", "approach"],
+];
+
+// A sample multi-sentence reply exercising every emotion-cue rule in
+// emotion-cues.ts, so the "beats within one answer" behavior is visible too:
+// a question (head-tilt), an exclamation/offer (wings-out bounce), a
+// greeting (wave), and a price mention (point) -- see splitIntoBeats.
+const MOTION_SHOWCASE_REPLY =
+  "Have you tried our mangoes? They're on special today! Hi there, welcome to the stall. The price is RM 5.";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Dev-only helper: plays every emotion's idle personality, every gesture's
+ * motion, and a sample multi-sentence reply (to show emotion-cues.ts changing
+ * pose mid-answer) back to back, so someone with the page open can watch the
+ * full set without needing to script real conversation turns. Exposed on
+ * `window` (not gated behind ?debug=true) so it's reachable from the devtools
+ * console on an already-open tab. Not part of the Kiosk_UI's normal operation.
+ */
+function exposeMotionShowcase(renderer: CharacterRenderer): void {
+  // Also expose the renderer itself so a single render(emotion, gesture) call
+  // can be tried directly from the console, not just the full cycle.
+  (window as unknown as { __vertewRenderer: CharacterRenderer }).__vertewRenderer = renderer;
+  (window as unknown as { __vertewCycleMotions: () => Promise<void> }).__vertewCycleMotions = async () => {
+    for (const [emotion, gesture] of MOTION_SHOWCASE_MOODS) {
+      renderer.render(emotion, gesture);
+      await sleep(6000); // long enough to see at least one idle flourish
+    }
+    for (const [emotion, gesture] of MOTION_SHOWCASE_GESTURES) {
+      renderer.render(emotion, gesture);
+      await sleep(2600); // just past GESTURE_HOLD_MS so it fully settles
+    }
+    const beats = splitIntoBeats(MOTION_SHOWCASE_REPLY, { emotion: "neutral", gesture: "idle" });
+    for (const beat of beats) {
+      renderer.render(beat.emotion, beat.gesture);
+      await sleep(2600);
+    }
+    renderer.playIdle();
+  };
+}
 
 export async function startKiosk(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
@@ -37,6 +87,7 @@ export async function startKiosk(): Promise<void> {
   await renderQr(qrUrl);
 
   const renderer = createCharacterRenderer();
+  exposeMotionShowcase(renderer);
   // "local": record + POST to the backend (faster-whisper, fully offline) --
   // used when the browser's own Web Speech API can't reach Google's speech
   // service. Otherwise fall back to the browser's built-in recognizer.
@@ -87,7 +138,15 @@ export async function startKiosk(): Promise<void> {
   events.connect();
 
   async function handleEvent(event: StoreEvent): Promise<void> {
-    if (["customer_detected", "customer_close"].includes(event.type)) videoQueue.enqueue(event.type);
+    if (event.type === "customer_close") videoQueue.enqueue(event.type);
+    // customer_detected used to play the greeting video; a 3D greeter flourish
+    // (wave -> excited jump -> approach) draws attention instead, since
+    // Higgsfield-generated video attempts from this line-art style came back
+    // motionless (tested with two different models). Only while idle, so an
+    // active conversation is never interrupted by a re-triggered sensor.
+    if (event.type === "customer_detected" && controller.state === "idle") {
+      void playGreeterSequence();
+    }
     if (event.type === "show_qr") showQr(true);
     if (event.type === "language_changed" && event.session_id === sessionId) {
       currentLanguage = String(event.payload.language ?? "en");
@@ -107,6 +166,20 @@ export async function startKiosk(): Promise<void> {
       await announceReady(orderNumber, language);
     }
     if (ORDER_BOARD_EVENTS.has(event.type)) void refreshOrderBoard();
+  }
+
+  // Attention-grabbing beat played once when a customer is first detected --
+  // see the handleEvent comment above for why this is 3D motion, not video.
+  const GREETER_SEQUENCE: [string, string][] = [
+    ["happy", "wave"], ["surprised", "jump"], ["happy", "approach"],
+  ];
+  async function playGreeterSequence(): Promise<void> {
+    for (const [emotion, gesture] of GREETER_SEQUENCE) {
+      if (controller.state !== "idle") return; // a conversation started mid-sequence
+      renderer.render(emotion, gesture);
+      await sleep(2500);
+    }
+    if (controller.state === "idle") renderer.playIdle();
   }
 
   const ORDER_STATUS_LABEL: Record<string, string> = {

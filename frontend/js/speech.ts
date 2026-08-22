@@ -383,7 +383,6 @@ interface WindowWithWebkitAudioContext {
 
 export class LocalSttProvider implements SttProvider {
   private callback: ((r: SttResult) => void) | null = null;
-  private lang = "en";
 
   private stream: MediaStream | null = null;
   private recorder: MediaRecorder | null = null;
@@ -397,18 +396,17 @@ export class LocalSttProvider implements SttProvider {
   private speechStarted = false;
   private settled = false;
 
-  constructor(lang: string = "en-US") {
-    this.lang = LocalSttProvider.isoLanguage(lang);
-  }
+  constructor(_lang: string = "en-US") {}
 
-  /** Whisper wants an ISO-639-1 code ("ko"), not a browser locale ("ko-KR"). */
-  private static isoLanguage(lang: string): string {
-    return lang.split("-")[0].toLowerCase();
-  }
-
-  setLanguage(lang: string): void {
-    this.lang = LocalSttProvider.isoLanguage(lang);
-  }
+  /**
+   * No-op: unlike the browser's Web Speech API, Whisper (backend/stt.py)
+   * always auto-detects the spoken language from the audio itself, so there is
+   * no recognition language to keep in sync here. Forcing one previously meant
+   * a customer's first non-English utterance was transcribed *as* English
+   * (garbled), which could never produce the characters needed to detect and
+   * switch away from English -- kept as a no-op only to satisfy SttProvider.
+   */
+  setLanguage(_lang: string): void {}
 
   onResult(cb: (r: SttResult) => void): void {
     this.callback = cb;
@@ -530,7 +528,6 @@ export class LocalSttProvider implements SttProvider {
     try {
       const form = new FormData();
       form.append("audio", blob, "clip.webm");
-      form.append("language", this.lang);
       const response = await fetch("/api/stt/transcribe", { method: "POST", body: form });
       if (!response.ok) {
         this.emit({ kind: "error", reason: "network" });
