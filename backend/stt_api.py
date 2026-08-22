@@ -8,7 +8,7 @@ Only reachable/meaningful when STT_PROVIDER=local (see /api/stt/config).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Form, HTTPException, UploadFile
+from fastapi import APIRouter, HTTPException, UploadFile
 from starlette.concurrency import run_in_threadpool
 
 import stt
@@ -27,15 +27,18 @@ def stt_config() -> dict:
 
 
 @router.post("/transcribe")
-async def transcribe(audio: UploadFile, language: str | None = Form(default=None)) -> dict:
-    """Transcribe one uploaded audio clip and return its text."""
+async def transcribe(audio: UploadFile) -> dict:
+    """Transcribe one uploaded audio clip and return its text plus the language
+    Whisper detected from the audio itself (code, confidence 0..1) -- the
+    Kiosk_UI feeds this into the session's language auto-detection alongside
+    the text-based heuristic, see frontend/js/speech.ts and hologram.ts."""
     body = await audio.read()
     if not body:
         raise HTTPException(400, "Empty audio upload")
     if len(body) > MAX_AUDIO_BYTES:
         raise HTTPException(413, "Audio clip too large")
     try:
-        text = await run_in_threadpool(stt.get_engine().transcribe, body, language)
+        text, language, confidence = await run_in_threadpool(stt.get_engine().transcribe, body)
     except stt.SttUnavailableError as exc:
         raise HTTPException(503, f"Local STT unavailable: {exc}") from exc
-    return {"text": text}
+    return {"text": text, "language": language, "language_probability": confidence}

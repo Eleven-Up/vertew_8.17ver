@@ -148,6 +148,15 @@ class Product:
     spice_level: int = 0
     ingredients: dict[str, str] = field(default_factory=dict)
     allergens: tuple[str, ...] = ()
+    # Units in stock. 999 is the "not actively tracked" sentinel used for rows
+    # created before this field existed; vendors managing real inventory set a
+    # real count, and it is decremented as orders are placed (see
+    # DataStore.create_order). Reaching 0 forces ``available`` to ``False``.
+    stock_count: int = 999
+    # Per-language provenance text (e.g. "Sarawak, Malaysia"), shown to the
+    # customer and usable by the assistant for "where is this from?" questions.
+    # Empty dict means unset.
+    origin: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -167,6 +176,9 @@ class OrderItem:
     quantity: int
     product_name: dict[str, str]
     unit_price_minor: int
+    # Free-text special request for this item (e.g. "no cilantro please"),
+    # entered by the customer on the payment/review page. Empty when none.
+    note: str = ""
 
 
 @dataclass(frozen=True)

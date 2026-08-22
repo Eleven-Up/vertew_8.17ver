@@ -56,6 +56,7 @@ _MENU_LABELS: dict[str, dict[str, str]] = {
         "spice": "Spice",
         "ingredients": "Ingredients",
         "allergens": "Allergens",
+        "origin": "Origin",
         "none": "none declared",
     },
     "ko": {
@@ -67,6 +68,7 @@ _MENU_LABELS: dict[str, dict[str, str]] = {
         "spice": "맵기",
         "ingredients": "재료",
         "allergens": "알레르기 유발 성분",
+        "origin": "원산지",
         "none": "없음",
     },
     "ms": {
@@ -78,6 +80,7 @@ _MENU_LABELS: dict[str, dict[str, str]] = {
         "spice": "Kepedasan",
         "ingredients": "Bahan",
         "allergens": "Alergen",
+        "origin": "Asal",
         "none": "tiada",
     },
 }
@@ -146,9 +149,11 @@ def format_menu_knowledge(products: list[Product], language: str = "en") -> str:
     Only ``available`` products are included. Each line carries the catalog id in
     brackets (so the model can reference it in ``order_items``, mirroring how
     ``format_qa_knowledge`` brackets QA ids), the localized name and description,
-    the price, the spice level in words, the ingredients, and the allergens (or a
-    "none declared" marker). Returns an empty string when there is nothing to
-    describe so callers can omit the section entirely.
+    the price, the spice level in words, the ingredients, the allergens (or a
+    "none declared" marker), and the origin when set (e.g. "Sarawak, Malaysia"),
+    so the assistant can answer "where is this from?" without inventing it.
+    Returns an empty string when there is nothing to describe so callers can
+    omit the section entirely.
 
     The output is deterministic (products in catalog order, no timestamps), so it is
     safe to include in a cached prompt and straightforward to test.
@@ -168,11 +173,14 @@ def format_menu_knowledge(products: list[Product], language: str = "en") -> str:
         spice = spice_word(product.spice_level, lang)
         ingredients = _localized(product.ingredients, lang)
         allergens = ", ".join(product.allergens) if product.allergens else labels["none"]
+        origin = _localized(product.origin, lang)
 
         detail = f'{labels["price"]}: {price}. {labels["spice"]}: {spice}.'
         if ingredients:
             detail += f' {labels["ingredients"]}: {ingredients}.'
         detail += f' {labels["allergens"]}: {allergens}.'
+        if origin:
+            detail += f' {labels["origin"]}: {origin}.'
 
         prefix = f"- [{product.id}] {name}"
         if description:

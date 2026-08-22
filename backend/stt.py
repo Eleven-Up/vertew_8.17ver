@@ -42,11 +42,13 @@ class SttUnavailableError(RuntimeError):
 
 
 class SttEngine(Protocol):
-    """Turns a raw audio clip into text. One call transcribes one full utterance
-    (batch, not streaming) -- see LocalSttProvider in frontend/js/speech.ts, which
-    records client-side and posts the finished clip here."""
+    """Turns a raw audio clip into text plus the language Whisper itself
+    detected from the audio (code, confidence 0..1). One call transcribes one
+    full utterance (batch, not streaming) -- see LocalSttProvider in
+    frontend/js/speech.ts, which records client-side and posts the finished
+    clip here."""
 
-    def transcribe(self, audio_bytes: bytes, language: str | None) -> str: ...
+    def transcribe(self, audio_bytes: bytes) -> tuple[str, str, float]: ...
 
 
 class FasterWhisperEngine:
@@ -84,8 +86,16 @@ class FasterWhisperEngine:
             )
         return self._model
 
-    def transcribe(self, audio_bytes: bytes, language: str | None = None) -> str:
-        """Transcribe one complete audio clip and return the recognized text.
+    def transcribe(self, audio_bytes: bytes) -> tuple[str, str, float]:
+        """Transcribe one complete audio clip and return (text, language, confidence).
+
+        Always lets Whisper auto-detect the spoken language from the audio itself
+        rather than being told which language to expect: forcing a language hint
+        here previously meant a customer's first utterance in a non-English
+        language was transcribed *as English* (garbled), which never produced the
+        non-English characters the downstream session-language detection needs to
+        switch away from English -- a self-reinforcing lock-in. Auto-detecting
+        every time closes that loop.
 
         Runs synchronously (CPU-bound); callers on the FastAPI event loop should
         offload this to a thread (see stt_api.py's use of run_in_threadpool).
@@ -100,10 +110,9 @@ class FasterWhisperEngine:
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(audio_bytes)
-            segments, _info = model.transcribe(
-                path, language=language or None, beam_size=1, vad_filter=True
-            )
-            return "".join(segment.text for segment in segments).strip()
+            segments, info = model.transcribe(path, beam_size=1, vad_filter=True)
+            text = "".join(segment.text for segment in segments).strip()
+            return text, info.language, info.language_probability
         except Exception as exc:  # noqa: BLE001 - any decode/inference failure
             raise SttUnavailableError(str(exc)) from exc
         finally:

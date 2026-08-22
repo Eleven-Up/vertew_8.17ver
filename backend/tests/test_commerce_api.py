@@ -26,6 +26,8 @@ def test_menu_contains_multilingual_demo_products(tmp_path):
         assert [product["id"] for product in products] == [
             "watermelon",
             "mango",
+            "apple_mango",
+            "gold_mango",
             "banana",
             "apple",
         ]
@@ -33,6 +35,7 @@ def test_menu_contains_multilingual_demo_products(tmp_path):
         assert mango["name"] == {"en": "Mango", "ko": "망고", "ms": "Mangga"}
         assert mango["price_minor"] == 500
         assert mango["currency"] == "MYR"
+        assert mango["origin"] == {"en": "Chiang Mai, Thailand", "ko": "태국 치앙마이", "ms": "Chiang Mai, Thailand"}
 
         media = client.get("/api/stores/demo/media")
         assert media.status_code == 200
@@ -44,7 +47,12 @@ def test_menu_contains_multilingual_demo_products(tmp_path):
         _close(store)
 
 
-def test_session_language_priority(tmp_path):
+def test_session_language_follows_latest_confident_detection(tmp_path):
+    """A confident auto-detection always wins, even over an earlier explicit
+    selection -- so the session (UI, TTS, reply language) follows whatever
+    language the customer is actually speaking right now, not a stale choice
+    made earlier on the order page. Only a low-confidence auto-detection is
+    ignored, to avoid drifting on noisy/ambiguous transcripts."""
     client, store = _client(tmp_path)
     try:
         created = client.post("/api/sessions", json={"store_id": "demo"})
@@ -65,12 +73,22 @@ def test_session_language_priority(tmp_path):
         )
         assert selected.json()["language"] == "en"
 
+        # A later, confident auto-detection now overrides the earlier explicit
+        # selection -- speaking Malay after picking "English" switches back.
+        redetected = client.patch(
+            f"/api/sessions/{session_id}/language",
+            json={"language": "ms", "language_source": "auto_detected", "confidence": 0.95},
+        )
+        assert redetected.json()["language"] == "ms"
+        assert redetected.json()["language_source"] == "auto_detected"
+
+        # A low-confidence auto-detection is still ignored (noise guard).
         ignored = client.patch(
             f"/api/sessions/{session_id}/language",
-            json={"language": "ms", "language_source": "auto_detected"},
+            json={"language": "en", "language_source": "auto_detected", "confidence": 0.5},
         )
-        assert ignored.json()["language"] == "en"
-        assert ignored.json()["language_source"] == "user_selected"
+        assert ignored.json()["language"] == "ms"
+        assert ignored.json()["language_source"] == "auto_detected"
     finally:
         _close(store)
 
@@ -130,6 +148,117 @@ def test_order_rejects_unknown_product(tmp_path):
             },
         )
         assert response.status_code == 404
+    finally:
+        _close(store)
+
+
+def test_order_item_note_is_recorded_and_returned(tmp_path):
+    client, store = _client(tmp_path)
+    try:
+        session = client.post("/api/sessions", json={"store_id": "demo"}).json()
+        response = client.post(
+            "/api/orders",
+            json={
+                "store_id": "demo",
+                "session_id": session["id"],
+                "items": [{"product_id": "mango", "quantity": 1, "note": "no cilantro please"}],
+                "customer_language": "en",
+            },
+        )
+        assert response.status_code == 201
+        order = response.json()
+        assert order["items"][0]["note"] == "no cilantro please"
+
+        fetched = client.get(f"/api/orders/{order['id']}").json()
+        assert fetched["items"][0]["note"] == "no cilantro please"
+    finally:
+        _close(store)
+
+
+def test_draft_checkout_carries_item_note_into_the_order(tmp_path):
+    client, store = _client(tmp_path)
+    try:
+        session = client.post("/api/sessions", json={"store_id": "demo"}).json()
+        session_id = session["id"]
+        client.patch(
+            f"/api/sessions/{session_id}/draft",
+            json={"items": [{"product_id": "banana", "quantity": 2, "note": "extra ripe"}]},
+        )
+        draft = client.get(f"/api/sessions/{session_id}/draft").json()
+        assert draft["items"][0]["note"] == "extra ripe"
+
+        order = client.post(f"/api/sessions/{session_id}/draft/checkout").json()
+        assert order["items"][0]["note"] == "extra ripe"
+    finally:
+        _close(store)
+
+
+def test_stock_reaches_zero_marks_product_unavailable(tmp_path):
+    client, store = _client(tmp_path)
+    try:
+        created = client.post(
+            "/api/stores/demo/products",
+            json={"name_en": "Dragonfruit", "price_minor": 600, "stock_count": 2},
+        )
+        assert created.status_code == 201
+        product = created.json()
+        assert product["id"] == "dragonfruit"
+        assert product["available"] is True
+
+        session = client.post("/api/sessions", json={"store_id": "demo"}).json()
+        client.post(
+            "/api/orders",
+            json={
+                "store_id": "demo",
+                "session_id": session["id"],
+                "items": [{"product_id": "dragonfruit", "quantity": 2}],
+                "customer_language": "en",
+            },
+        )
+
+        menu = client.get("/api/stores/demo/menu").json()["products"]
+        dragonfruit = next(item for item in menu if item["id"] == "dragonfruit")
+        assert dragonfruit["stock_count"] == 0
+        assert dragonfruit["available"] is False
+
+        rejected = client.post(
+            "/api/orders",
+            json={
+                "store_id": "demo",
+                "session_id": session["id"],
+                "items": [{"product_id": "dragonfruit", "quantity": 1}],
+                "customer_language": "en",
+            },
+        )
+        assert rejected.status_code == 404
+    finally:
+        _close(store)
+
+
+def test_vendor_can_edit_and_delete_a_menu_item(tmp_path):
+    client, store = _client(tmp_path)
+    try:
+        created = client.post(
+            "/api/stores/demo/products",
+            json={"name_en": "Papaya", "price_minor": 450, "stock_count": 10},
+        ).json()
+
+        updated = client.patch(
+            f"/api/stores/demo/products/{created['id']}",
+            json={"name_en": "Papaya", "price_minor": 500, "stock_count": 5, "available": True},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["price_minor"] == 500
+        assert updated.json()["stock_count"] == 5
+
+        deleted = client.delete(f"/api/stores/demo/products/{created['id']}")
+        assert deleted.status_code == 204
+
+        missing = client.patch(
+            f"/api/stores/demo/products/{created['id']}",
+            json={"name_en": "Papaya", "price_minor": 500, "stock_count": 5},
+        )
+        assert missing.status_code == 404
     finally:
         _close(store)
 

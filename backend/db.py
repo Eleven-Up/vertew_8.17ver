@@ -76,6 +76,8 @@ CREATE TABLE IF NOT EXISTS products (
     spice_level     INTEGER NOT NULL DEFAULT 0 CHECK (spice_level BETWEEN 0 AND 3),
     ingredients_json TEXT NOT NULL DEFAULT '{}',
     allergens_json  TEXT NOT NULL DEFAULT '[]',
+    stock_count     INTEGER NOT NULL DEFAULT 999,
+    origin_json     TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (store_id, id),
     FOREIGN KEY (store_id) REFERENCES stores(id)
 );
@@ -114,6 +116,7 @@ CREATE TABLE IF NOT EXISTS order_items (
     quantity          INTEGER NOT NULL CHECK (quantity > 0),
     product_name_json TEXT NOT NULL,
     unit_price_minor  INTEGER NOT NULL,
+    note              TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (order_id, product_id),
     FOREIGN KEY (order_id) REFERENCES orders(id)
 );
@@ -152,15 +155,20 @@ CREATE TABLE IF NOT EXISTS qa_entries (
 
 # Demo catalog. Each entry is:
 #   (id, name{lang}, description{lang}, price_minor, image,
-#    spice_level, ingredients{lang}, allergens(tuple))
+#    spice_level, ingredients{lang}, allergens(tuple), origin{lang})
 # spice_level is 0..3 (0 = not spicy); allergens are canonical lowercase English
 # tags (empty = none declared). These structured fields are what the assistant
-# reads to answer "what is in this?" / "how spicy is it?" questions.
+# reads to answer "what is in this?" / "how spicy is it?" / "where is this
+# from?" questions. Mango has three distinct varieties (regular/apple/gold),
+# each its own catalog entry with its own price/image/origin -- not sub-items
+# of one "mango" product.
 DEMO_PRODUCTS = (
-    ("watermelon", {"en": "Watermelon", "ko": "수박", "ms": "Tembikai"}, {"en": "Cool and refreshing watermelon", "ko": "시원하고 상쾌한 수박", "ms": "Tembikai yang sejuk dan menyegarkan"}, 400, "/images/watermelon.png", 0, {"en": "Fresh-cut watermelon, nothing added", "ko": "갓 자른 수박, 첨가물 없음", "ms": "Tembikai potong segar, tanpa tambahan"}, ()),
-    ("mango", {"en": "Mango", "ko": "망고", "ms": "Mangga"}, {"en": "Sweet and fresh mango", "ko": "달고 신선한 망고", "ms": "Mangga manis dan segar"}, 500, "/images/mango.png", 0, {"en": "Fresh mango", "ko": "신선한 망고", "ms": "Mangga segar"}, ()),
-    ("banana", {"en": "Banana", "ko": "바나나", "ms": "Pisang"}, {"en": "Soft and naturally sweet banana", "ko": "부드럽고 자연스럽게 달콤한 바나나", "ms": "Pisang lembut dan manis semula jadi"}, 300, "/images/banana.png", 0, {"en": "Fresh banana", "ko": "신선한 바나나", "ms": "Pisang segar"}, ()),
-    ("apple", {"en": "Apple", "ko": "사과", "ms": "Epal"}, {"en": "Crisp and juicy apple", "ko": "아삭하고 과즙이 풍부한 사과", "ms": "Epal rangup dan berjus"}, 350, "/images/apple.png", 0, {"en": "Fresh-cut apple", "ko": "갓 자른 사과", "ms": "Epal potong segar"}, ()),
+    ("watermelon", {"en": "Watermelon", "ko": "수박", "ms": "Tembikai"}, {"en": "Cool and refreshing watermelon", "ko": "시원하고 상쾌한 수박", "ms": "Tembikai yang sejuk dan menyegarkan"}, 400, "/images/watermelon.png", 0, {"en": "Fresh-cut watermelon, nothing added", "ko": "갓 자른 수박, 첨가물 없음", "ms": "Tembikai potong segar, tanpa tambahan"}, (), {"en": "Sarawak, Malaysia", "ko": "말레이시아 사라왁", "ms": "Sarawak, Malaysia"}),
+    ("mango", {"en": "Mango", "ko": "망고", "ms": "Mangga"}, {"en": "Sweet and fresh mango", "ko": "달고 신선한 망고", "ms": "Mangga manis dan segar"}, 500, "/images/mango.png", 0, {"en": "Fresh mango", "ko": "신선한 망고", "ms": "Mangga segar"}, (), {"en": "Chiang Mai, Thailand", "ko": "태국 치앙마이", "ms": "Chiang Mai, Thailand"}),
+    ("apple_mango", {"en": "Apple Mango", "ko": "애플망고", "ms": "Mangga Epal"}, {"en": "Small, round mango with dark red-blushed skin and rich, dense flesh", "ko": "껍질이 진한 적색을 띠는 작고 동그란 망고로 과육이 진하고 부드러워요", "ms": "Mangga bulat kecil berkulit merah gelap dengan isi yang padat dan kaya rasa"}, 700, "/images/apple_mango.png", 0, {"en": "Fresh apple mango", "ko": "신선한 애플망고", "ms": "Mangga epal segar"}, (), {"en": "Tainan, Taiwan", "ko": "대만 타이난", "ms": "Tainan, Taiwan"}),
+    ("gold_mango", {"en": "Gold Mango", "ko": "골드망고", "ms": "Mangga Emas"}, {"en": "Elongated golden-yellow mango, very sweet with a smooth, fiber-free flesh", "ko": "길쭉한 황금빛 망고로 매우 달고 과육이 부드러워요", "ms": "Mangga kuning-emas lonjong, sangat manis dengan isi yang lembut"}, 650, "/images/gold_mango.png", 0, {"en": "Fresh gold mango", "ko": "신선한 골드망고", "ms": "Mangga emas segar"}, (), {"en": "Guimaras, Philippines", "ko": "필리핀 기마라스", "ms": "Guimaras, Filipina"}),
+    ("banana", {"en": "Banana", "ko": "바나나", "ms": "Pisang"}, {"en": "Soft and naturally sweet banana", "ko": "부드럽고 자연스럽게 달콤한 바나나", "ms": "Pisang lembut dan manis semula jadi"}, 300, "/images/banana.png", 0, {"en": "Fresh banana", "ko": "신선한 바나나", "ms": "Pisang segar"}, (), {"en": "Johor, Malaysia", "ko": "말레이시아 조호르", "ms": "Johor, Malaysia"}),
+    ("apple", {"en": "Apple", "ko": "사과", "ms": "Epal"}, {"en": "Crisp and juicy apple", "ko": "아삭하고 과즙이 풍부한 사과", "ms": "Epal rangup dan berjus"}, 350, "/images/apple.png", 0, {"en": "Fresh-cut apple", "ko": "갓 자른 사과", "ms": "Epal potong segar"}, (), {"en": "Nagano, Japan", "ko": "일본 나가노", "ms": "Nagano, Jepun"}),
 )
 
 # Demo FAQ/Q&A knowledge base. Each entry is (id, question, answer{lang}, category).
@@ -338,19 +346,23 @@ class DataStore:
         self._conn.commit()
 
     def _migrate_product_menu_columns(self) -> None:
-        """Add the structured menu-knowledge columns to a pre-existing products
-        table (spice_level, ingredients_json, allergens_json).
+        """Add columns to pre-existing ``products``/``order_items`` tables that
+        were introduced after those tables were first created (spice_level,
+        ingredients_json, allergens_json, stock_count, order_items.note).
 
-        ``CREATE TABLE IF NOT EXISTS`` leaves an already-created ``products`` table
-        untouched, so a database seeded before these columns existed would be
-        missing them. Each ``ADD COLUMN`` is attempted independently and the
-        "duplicate column name" error is swallowed, making the migration a no-op on
-        an up-to-date schema and safe to run on every startup.
+        ``CREATE TABLE IF NOT EXISTS`` leaves an already-created table untouched,
+        so a database seeded before these columns existed would be missing them.
+        Each ``ADD COLUMN`` is attempted independently and the "duplicate column
+        name" error is swallowed, making the migration a no-op on an up-to-date
+        schema and safe to run on every startup.
         """
         migrations = (
             "ALTER TABLE products ADD COLUMN spice_level INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE products ADD COLUMN ingredients_json TEXT NOT NULL DEFAULT '{}'",
             "ALTER TABLE products ADD COLUMN allergens_json TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE products ADD COLUMN stock_count INTEGER NOT NULL DEFAULT 999",
+            "ALTER TABLE order_items ADD COLUMN note TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE products ADD COLUMN origin_json TEXT NOT NULL DEFAULT '{}'",
         )
         for statement in migrations:
             try:
@@ -369,8 +381,10 @@ class DataStore:
             self._conn.executemany(
                 "INSERT OR IGNORE INTO products "
                 "(id, store_id, name_json, description_json, price_minor, currency, available, image, "
-                "spice_level, ingredients_json, allergens_json) "
-                "VALUES (?, 'demo', ?, ?, ?, 'MYR', 1, ?, ?, ?, ?)",
+                "spice_level, ingredients_json, allergens_json, origin_json) "
+                "VALUES (?, 'demo', ?, ?, ?, 'MYR', 1, ?, ?, ?, ?, ?)",
+                # stock_count is intentionally omitted here -- it takes the schema's
+                # DEFAULT 999 ("not actively tracked") for the built-in demo catalog.
                 [
                     (
                         product_id,
@@ -381,8 +395,9 @@ class DataStore:
                         spice_level,
                         json.dumps(ingredients, ensure_ascii=False),
                         json.dumps(list(allergens), ensure_ascii=False),
+                        json.dumps(origin, ensure_ascii=False),
                     )
-                    for product_id, name, description, price, image, spice_level, ingredients, allergens in DEMO_PRODUCTS
+                    for product_id, name, description, price, image, spice_level, ingredients, allergens, origin in DEMO_PRODUCTS
                 ],
             )
             self._conn.executemany(
@@ -559,6 +574,98 @@ class DataStore:
         ).fetchone()
         return self._product_from_row(row) if row else None
 
+    def create_product(
+        self,
+        store_id: str,
+        product_id: str,
+        *,
+        name: dict[str, str],
+        description: dict[str, str],
+        price_minor: int,
+        image: str,
+        stock_count: int,
+        available: bool = True,
+        origin: dict[str, str] | None = None,
+    ) -> Product:
+        """Add a new menu item to ``store_id``'s catalog (vendor menu editor).
+
+        Raises ``StorageError`` (via the usual write path) on a duplicate id
+        within the store -- callers pick ``product_id`` (e.g. slugified from the
+        English name) and should retry with a different id on conflict.
+        """
+        self._write_with_retry(
+            "INSERT INTO products "
+            "(id, store_id, name_json, description_json, price_minor, currency, available, image, "
+            "spice_level, ingredients_json, allergens_json, stock_count, origin_json) "
+            "VALUES (?, ?, ?, ?, ?, 'MYR', ?, ?, 0, '{}', '[]', ?, ?)",
+            (
+                product_id,
+                store_id,
+                json.dumps(name, ensure_ascii=False),
+                json.dumps(description, ensure_ascii=False),
+                price_minor,
+                1 if (available and stock_count > 0) else 0,
+                image,
+                max(0, stock_count),
+                json.dumps(origin or {}, ensure_ascii=False),
+            ),
+        )
+        row = self._conn.execute(
+            "SELECT * FROM products WHERE store_id = ? AND id = ?", (store_id, product_id)
+        ).fetchone()
+        return self._product_from_row(row)  # type: ignore[return-value]
+
+    def update_product_listing(
+        self,
+        store_id: str,
+        product_id: str,
+        *,
+        name: dict[str, str],
+        description: dict[str, str],
+        price_minor: int,
+        image: str,
+        stock_count: int,
+        available: bool,
+        origin: dict[str, str] | None = None,
+    ) -> Product | None:
+        """Update a menu item's listing fields (name, description, price, image,
+        stock, origin, availability) for the vendor menu editor -- distinct from
+        :meth:`update_product`, which only edits the assistant's grounding
+        fields (spice/ingredients/allergens). Returns ``None`` if not found."""
+        with self._conn:
+            cursor = self._conn.execute(
+                "UPDATE products SET name_json = ?, description_json = ?, price_minor = ?, "
+                "image = ?, stock_count = ?, available = ?, origin_json = ? WHERE store_id = ? AND id = ?",
+                (
+                    json.dumps(name, ensure_ascii=False),
+                    json.dumps(description, ensure_ascii=False),
+                    price_minor,
+                    image,
+                    max(0, stock_count),
+                    1 if (available and stock_count > 0) else 0,
+                    json.dumps(origin or {}, ensure_ascii=False),
+                    store_id,
+                    product_id,
+                ),
+            )
+        if cursor.rowcount == 0:
+            return None
+        row = self._conn.execute(
+            "SELECT * FROM products WHERE store_id = ? AND id = ?", (store_id, product_id)
+        ).fetchone()
+        return self._product_from_row(row) if row else None
+
+    def delete_product(self, store_id: str, product_id: str) -> bool:
+        """Remove a menu item from the catalog. Returns ``True`` when a row was
+        deleted, ``False`` when no such product existed. Past orders keep their
+        own copy of the product name/price (``order_items``), so deleting a
+        product does not affect order history."""
+        with self._conn:
+            cursor = self._conn.execute(
+                "DELETE FROM products WHERE store_id = ? AND id = ?", (store_id, product_id)
+            )
+        return cursor.rowcount > 0
+
     def get_session(self, session_id: str) -> CustomerSession | None:
         row = self._conn.execute(
             "SELECT * FROM customer_sessions WHERE id = ?", (session_id,)
@@ -585,13 +692,23 @@ class DataStore:
         source: LanguageSource,
         confidence: float | None = None,
     ) -> CustomerSession | None:
+        """Update the session's tracked language.
+
+        The whole session (UI labels, TTS voice, reply language, order popups)
+        follows whichever language the customer most recently, confidently used
+        -- a confident ``AUTO_DETECTED`` reading always applies, even over an
+        earlier ``USER_SELECTED`` choice, so answering a question in Korean after
+        picking "English" on the order page switches the session back to Korean.
+        The only guard is against noise: a low-confidence auto-detection
+        (``confidence < 0.8``) is ignored, and ``DEFAULT`` never overwrites an
+        already-set session (it only applies at session creation).
+        """
         current = self.get_session(session_id)
         if current is None:
             return None
-        priority = {LanguageSource.DEFAULT: 0, LanguageSource.AUTO_DETECTED: 1, LanguageSource.USER_SELECTED: 2}
         if source == LanguageSource.AUTO_DETECTED and confidence is not None and confidence < 0.8:
             return current
-        if priority[source] < priority[current.language_source]:
+        if source == LanguageSource.DEFAULT and current.language_source != LanguageSource.DEFAULT:
             return current
         self._write_with_retry(
             "UPDATE customer_sessions SET language = ?, language_source = ?, updated_at = ? WHERE id = ?",
@@ -608,17 +725,37 @@ class DataStore:
     # replace rather than a delta). Cleared once checkout_draft turns it into a
     # real, vendor-visible Order.
     # ------------------------------------------------------------------
-    def get_draft_items(self, session_id: str) -> dict[str, int]:
+    def get_draft_items(self, session_id: str) -> dict[str, dict]:
+        """Return the draft as ``{product_id: {"quantity": int, "note": str}}``.
+
+        Normalizes rows written before per-item notes existed (plain
+        ``{product_id: quantity}``) into the same shape on read.
+        """
         row = self._conn.execute(
             "SELECT items_json FROM session_drafts WHERE session_id = ?", (session_id,)
         ).fetchone()
-        return json.loads(row["items_json"]) if row else {}
+        if not row:
+            return {}
+        raw = json.loads(row["items_json"])
+        return {
+            product_id: (
+                {"quantity": entry, "note": ""}
+                if isinstance(entry, int)
+                else {"quantity": entry.get("quantity", 0), "note": entry.get("note", "")}
+            )
+            for product_id, entry in raw.items()
+        }
 
-    def set_draft_items(self, session_id: str, items: dict[str, int]) -> dict[str, int]:
-        """Replace the draft with exactly these quantities (an absolute set, not
-        a delta) -- used by the payment page's button edits. Non-positive
-        quantities are dropped rather than stored as zero/negative rows."""
-        cleaned = {product_id: quantity for product_id, quantity in items.items() if quantity > 0}
+    def set_draft_items(self, session_id: str, items: dict[str, dict]) -> dict[str, dict]:
+        """Replace the draft with exactly these ``{"quantity", "note"}`` entries
+        (an absolute set, not a delta) -- used by the payment page's button
+        edits. Non-positive quantities are dropped rather than stored as
+        zero/negative rows."""
+        cleaned = {
+            product_id: {"quantity": entry["quantity"], "note": entry.get("note", "")}
+            for product_id, entry in items.items()
+            if entry["quantity"] > 0
+        }
         self._write_with_retry(
             "INSERT INTO session_drafts (session_id, items_json, updated_at) VALUES (?, ?, ?) "
             "ON CONFLICT(session_id) DO UPDATE SET items_json = excluded.items_json, "
@@ -627,13 +764,19 @@ class DataStore:
         )
         return cleaned
 
-    def merge_draft_items(self, session_id: str, deltas: list[tuple[str, int]]) -> dict[str, int]:
+    def merge_draft_items(self, session_id: str, deltas: list[tuple[str, int]]) -> dict[str, dict]:
         """Add quantities on top of the current draft -- used when the
         conversation recognizes newly-ordered items from natural speech (an
-        incremental delta, unlike the payment page's absolute set_draft_items)."""
+        incremental delta, unlike the payment page's absolute set_draft_items).
+        Any note already on an item is preserved; voice recognition never sets
+        one itself."""
         current = self.get_draft_items(session_id)
         for product_id, quantity in deltas:
-            current[product_id] = max(0, current.get(product_id, 0) + quantity)
+            existing = current.get(product_id, {"quantity": 0, "note": ""})
+            current[product_id] = {
+                "quantity": max(0, existing["quantity"] + quantity),
+                "note": existing["note"],
+            }
         return self.set_draft_items(session_id, current)
 
     def clear_draft(self, session_id: str) -> None:
@@ -650,8 +793,9 @@ class DataStore:
         items = self.get_draft_items(session_id)
         if not items:
             raise ValueError("draft_empty")
+        requested = [(product_id, entry["quantity"], entry["note"]) for product_id, entry in items.items()]
         order = self.create_order(
-            store_id, session_id, list(items.items()), customer_language, order_source
+            store_id, session_id, requested, customer_language, order_source
         )
         self.clear_draft(session_id)
         return order
@@ -660,7 +804,7 @@ class DataStore:
         self,
         store_id: str,
         session_id: str,
-        requested_items: list[tuple[str, int]],
+        requested_items: list[tuple[str, int]] | list[tuple[str, int, str]],
         customer_language: str,
         order_source: str,
     ) -> Order:
@@ -668,15 +812,28 @@ class DataStore:
         if session is None or session.store_id != store_id:
             raise KeyError("session_not_found")
         product_map = {product.id: product for product in self.list_products(store_id)}
+        # requested_items entries are either (product_id, quantity) -- the voice
+        # ordering path, which never carries a note -- or (product_id, quantity,
+        # note) from the customer's draft/payment page.
         quantities: dict[str, int] = {}
-        for product_id, quantity in requested_items:
+        notes: dict[str, str] = {}
+        for entry in requested_items:
+            product_id, quantity = entry[0], entry[1]
+            note = entry[2] if len(entry) > 2 else ""
             quantities[product_id] = quantities.get(product_id, 0) + quantity
+            if note:
+                notes[product_id] = note
         items: list[OrderItem] = []
         for product_id, quantity in quantities.items():
             product = product_map.get(product_id)
             if product is None or not product.available:
                 raise KeyError(f"product_not_found:{product_id}")
-            items.append(OrderItem(product_id, quantity, product.name, product.price_minor))
+            items.append(
+                OrderItem(
+                    product_id, quantity, product.name, product.price_minor,
+                    note=notes.get(product_id, ""),
+                )
+            )
 
         now = datetime.now(timezone.utc)
         order_id = f"order_{uuid.uuid4().hex}"
@@ -694,8 +851,19 @@ class DataStore:
                     (order_id, store_id, session_id, next_number, customer_language, order_source, total, _to_iso(now), _to_iso(now)),
                 )
                 self._conn.executemany(
-                    "INSERT INTO order_items (order_id, product_id, quantity, product_name_json, unit_price_minor) VALUES (?, ?, ?, ?, ?)",
-                    [(order_id, item.product_id, item.quantity, json.dumps(item.product_name, ensure_ascii=False), item.unit_price_minor) for item in items],
+                    "INSERT INTO order_items (order_id, product_id, quantity, product_name_json, unit_price_minor, note) VALUES (?, ?, ?, ?, ?, ?)",
+                    [(order_id, item.product_id, item.quantity, json.dumps(item.product_name, ensure_ascii=False), item.unit_price_minor, item.note) for item in items],
+                )
+                # Decrement stock for each ordered item; a product whose stock
+                # reaches zero is automatically marked unavailable so it can no
+                # longer be ordered (vendor-managed items only -- the untracked
+                # 999 sentinel never gets anywhere near zero from real orders).
+                self._conn.executemany(
+                    "UPDATE products SET "
+                    "stock_count = MAX(0, stock_count - ?), "
+                    "available = CASE WHEN stock_count - ? <= 0 THEN 0 ELSE available END "
+                    "WHERE store_id = ? AND id = ?",
+                    [(item.quantity, item.quantity, store_id, item.product_id) for item in items],
                 )
                 self._conn.execute(
                     "UPDATE customer_sessions SET order_id = ?, updated_at = ? WHERE id = ?",
@@ -746,6 +914,8 @@ class DataStore:
         spice_level = int(row["spice_level"]) if "spice_level" in columns else 0
         ingredients = json.loads(row["ingredients_json"]) if "ingredients_json" in columns else {}
         allergens = tuple(json.loads(row["allergens_json"])) if "allergens_json" in columns else ()
+        stock_count = int(row["stock_count"]) if "stock_count" in columns else 999
+        origin = json.loads(row["origin_json"]) if "origin_json" in columns else {}
         return Product(
             row["id"],
             row["store_id"],
@@ -758,6 +928,8 @@ class DataStore:
             spice_level=spice_level,
             ingredients=ingredients,
             allergens=allergens,
+            stock_count=stock_count,
+            origin=origin,
         )
 
     @staticmethod
@@ -779,7 +951,13 @@ class DataStore:
 
     def _order_from_row(self, row: sqlite3.Row) -> Order:
         item_rows = self._conn.execute("SELECT * FROM order_items WHERE order_id = ? ORDER BY rowid", (row["id"],)).fetchall()
-        items = tuple(OrderItem(item["product_id"], item["quantity"], json.loads(item["product_name_json"]), item["unit_price_minor"]) for item in item_rows)
+        items = tuple(
+            OrderItem(
+                item["product_id"], item["quantity"], json.loads(item["product_name_json"]),
+                item["unit_price_minor"], note=item["note"] if "note" in item.keys() else "",
+            )
+            for item in item_rows
+        )
         return Order(row["id"], row["store_id"], row["session_id"], row["order_number"], OrderStatus(row["status"]), row["customer_language"], row["order_source"], row["total_minor"], row["currency"], items, datetime.fromisoformat(row["created_at"]), datetime.fromisoformat(row["updated_at"]))
 
     # ------------------------------------------------------------------
