@@ -7,7 +7,7 @@ Type=simple
 WorkingDirectory=/opt/vertew/backend
 EnvironmentFile=/opt/vertew/backend/.env
 # ESP32 example. Replace with --adapter gpio for HC-SR04 connected to Pi pins.
-ExecStart=/opt/vertew/.venv/bin/python hardware_bridge.py --adapter serial --port /dev/ttyUSB0
+ExecStart=/opt/vertew/backend/.venv/bin/python hardware_bridge.py --adapter serial --port /dev/ttyUSB0
 Restart=always
 RestartSec=3
 User=pi

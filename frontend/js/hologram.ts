@@ -105,6 +105,21 @@ export async function loadMediaConfig(storeId: string): Promise<MediaConfig> {
   return response.json() as Promise<MediaConfig>;
 }
 
+/**
+ * Which STT backend the Kiosk_UI should use ("browser" | "local"; see
+ * backend/stt.py). Degrades to "browser" -- the historical default -- on any
+ * failure rather than throwing, so a hiccup here never blocks kiosk boot.
+ */
+export async function getSttConfig(): Promise<{ provider: string }> {
+  try {
+    const response = await fetch("/api/stt/config");
+    if (!response.ok) return { provider: "browser" };
+    return (await response.json()) as { provider: string };
+  } catch {
+    return { provider: "browser" };
+  }
+}
+
 export async function createCustomerSession(storeId: string): Promise<{ id: string; language: string }> {
   const response = await fetch("/api/sessions", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ store_id: storeId }),
@@ -130,6 +145,25 @@ export async function getReadyOrders(storeId: string): Promise<Array<{ id: strin
   if (!response.ok) throw new Error("Could not load ready orders");
   const data = await response.json() as { orders: Array<{ id: string; status: string; order_number: number; customer_language: string }> };
   return data.orders;
+}
+
+/** One order as shown on the hologram's read-only order-status board. */
+export interface BoardOrder {
+  id: string;
+  order_number: number;
+  status: "PENDING" | "ACCEPTED" | "PREPARING" | "READY" | "COMPLETED" | "REJECTED";
+  items: Array<{ product_id: string; quantity: number; product_name: Record<string, string> }>;
+}
+
+const BOARD_STATUSES = new Set(["PENDING", "ACCEPTED", "PREPARING", "READY"]);
+
+/** Every order the vendor is still working (excludes COMPLETED/REJECTED) --
+ * what waiting customers can check on the shared hologram display. */
+export async function getActiveOrders(storeId: string): Promise<BoardOrder[]> {
+  const response = await fetch(`/api/stores/${encodeURIComponent(storeId)}/orders`);
+  if (!response.ok) throw new Error("Could not load store orders");
+  const data = await response.json() as { orders: BoardOrder[] };
+  return data.orders.filter((order) => BOARD_STATUSES.has(order.status));
 }
 
 export async function analyzeTranscript(

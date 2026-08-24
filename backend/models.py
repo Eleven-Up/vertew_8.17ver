@@ -9,7 +9,7 @@ values (Req 4.6, 5.2, 5.6).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
@@ -18,10 +18,23 @@ from enum import StrEnum
 # Each named value maps to exactly one expression/motion of the 2D character.
 # ---------------------------------------------------------------------------
 EMOTIONS: frozenset[str] = frozenset({"happy", "neutral", "surprised", "sad", "angry"})
-GESTURES: frozenset[str] = frozenset({"wave", "idle", "point", "nod", "think"})
+GESTURES: frozenset[str] = frozenset(
+    {"wave", "idle", "point", "nod", "think", "fly", "jump", "approach"}
+)
 
 DEFAULT_EMOTION: str = "neutral"
 DEFAULT_GESTURE: str = "idle"
+
+
+@dataclass(frozen=True)
+class OrderItemDelta:
+    """One item the customer just ordered in this turn, as the LLM recognized it
+    from natural speech (product_id from the MENU block + quantity). Merged into
+    the session's draft order by the Conversation_Server -- see
+    conversation.handle_transcript and db.DataStore.merge_draft_items."""
+
+    product_id: str
+    quantity: int
 
 
 @dataclass
@@ -38,6 +51,16 @@ class CharacterResponse:
     emotion: str
     gesture: str
     is_fallback: bool = False
+    # Orchestration metadata (not sent to the Kiosk_UI wire payload):
+    # ``action`` is "answer" (default) or "call_owner" to escalate to the vendor;
+    # ``matched_qa_id`` is the id of the curated QA entry the answer came from, or
+    # ``None`` when the answer was generated or the turn was escalated. These drive
+    # the human-escalation and the learning loop; see conversation.handle_transcript.
+    action: str = "answer"
+    matched_qa_id: str | None = None
+    # Items the customer ordered in this turn (empty when none were), merged into
+    # the session's draft order rather than sent to the Kiosk_UI wire payload.
+    order_items: tuple[OrderItemDelta, ...] = ()
 
 
 @dataclass
@@ -51,6 +74,28 @@ class StoreInfo:
     store_name: str
     products: str
     persona: str | None = None
+
+
+@dataclass(frozen=True)
+class QAEntry:
+    """A curated (or learned) question/answer pair used to ground the assistant.
+
+    ``answer`` is a per-language mapping mirroring product name/description.
+    ``status`` is one of ``approved`` (usable), ``pending`` (generated or owner-
+    provided, awaiting vendor approval), or ``archived``. ``source`` records where
+    the entry came from: ``curated`` (vendor-authored), ``generated`` (LLM), or
+    ``owner`` (captured from a vendor answer to an escalated question). ``aliases``
+    holds alternative phrasings that help matching.
+    """
+
+    id: str
+    store_id: str
+    question: str
+    answer: dict[str, str]
+    category: str = "general"
+    status: str = "approved"
+    source: str = "curated"
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass
@@ -79,6 +124,19 @@ class OrderStatus(StrEnum):
 
 @dataclass(frozen=True)
 class Product:
+    """A catalog product used both for ordering and as grounding for the
+    Conversation_Server's menu answers.
+
+    The first eight fields are the ordering catalog. The last three are the
+    structured "menu knowledge" the assistant reads to answer customer questions
+    such as "what is in this?" or "how spicy is it?": ``spice_level`` is a
+    language-independent 0..3 heat scale (0 = not spicy), ``ingredients`` mirrors
+    ``description`` as a per-language string, and ``allergens`` is a tuple of
+    canonical lowercase English allergen tags (e.g. ``("nuts", "dairy")``); an
+    empty tuple means no declared allergens. All three carry defaults so existing
+    call sites and stored rows without the columns keep working.
+    """
+
     id: str
     store_id: str
     name: dict[str, str]
@@ -87,6 +145,18 @@ class Product:
     currency: str
     available: bool
     image: str
+    spice_level: int = 0
+    ingredients: dict[str, str] = field(default_factory=dict)
+    allergens: tuple[str, ...] = ()
+    # Units in stock. 999 is the "not actively tracked" sentinel used for rows
+    # created before this field existed; vendors managing real inventory set a
+    # real count, and it is decremented as orders are placed (see
+    # DataStore.create_order). Reaching 0 forces ``available`` to ``False``.
+    stock_count: int = 999
+    # Per-language provenance text (e.g. "Sarawak, Malaysia"), shown to the
+    # customer and usable by the assistant for "where is this from?" questions.
+    # Empty dict means unset.
+    origin: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -106,6 +176,9 @@ class OrderItem:
     quantity: int
     product_name: dict[str, str]
     unit_price_minor: int
+    # Free-text special request for this item (e.g. "no cilantro please"),
+    # entered by the customer on the payment/review page. Empty when none.
+    note: str = ""
 
 
 @dataclass(frozen=True)

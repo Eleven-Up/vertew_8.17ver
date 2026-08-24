@@ -46,6 +46,7 @@ import commerce_api
 import debug_api
 import llm
 import sensor_api
+import stt_api
 from conversation import ConversationSession, handle_transcript
 from db import DataStore
 from realtime import ClientRole, build_event, manager
@@ -133,6 +134,7 @@ app.include_router(commerce_api.router)
 app.include_router(ai_api.router)
 app.include_router(debug_api.router)
 app.include_router(sensor_api.router)
+app.include_router(stt_api.router)
 
 
 def _extract_transcript(message: object) -> str | None:
@@ -205,8 +207,31 @@ async def conversation_ws(websocket: WebSocket) -> None:
                 data_store=data_store,
                 session=session,
                 language=customer_session.language if customer_session else "en",
+                store_id=customer_session.store_id if customer_session else "demo",
+                customer_session_id=session_id,
                 local_on_unavailable=True,
             )
+            # Human escalation: the assistant asked to fetch the vendor (question not
+            # covered by curated Q&A / menu, or a safety-sensitive allergy/health
+            # question). Notify the vendor dashboard over the store event bus; the
+            # customer still gets the "I'll call the owner" reply.
+            if getattr(response, "action", "answer") == "call_owner":
+                await manager.broadcast(
+                    customer_session.store_id if customer_session else "demo",
+                    "call_vendor",
+                    {
+                        "question": transcript,
+                        "language": customer_session.language if customer_session else "en",
+                    },
+                    session_id=session_id,
+                )
+            # The customer just ordered something by voice: reveal the payment QR
+            # (same event the kiosk already reacts to for the "purchase intent"
+            # debug/analyze-transcript path) so they can scan it to review and pay.
+            if getattr(response, "order_items", ()) and session_id and customer_session:
+                await manager.broadcast(
+                    customer_session.store_id, "show_qr", {"reason": "order_items"}, session_id=session_id
+                )
             await websocket.send_json(_response_payload(response))
     except WebSocketDisconnect:
         # Client closed the socket; nothing to clean up beyond the connection.

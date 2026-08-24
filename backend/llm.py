@@ -34,6 +34,7 @@ from typing import Protocol
 
 from models import (
     CharacterResponse,
+    OrderItemDelta,
     normalize_emotion,
     normalize_gesture,
 )
@@ -137,12 +138,47 @@ def parse(raw: RawResponse) -> CharacterResponse:
     ):
         return FALLBACK_UNDERSTAND
 
+    # Optional orchestration fields (Q&A grounding + human escalation). Unknown or
+    # missing values fall back to the safe defaults ("answer" / no match).
+    raw_action = data.get("action")
+    action = raw_action if raw_action in {"answer", "call_owner"} else "answer"
+    raw_matched = data.get("matched_qa_id")
+    matched_qa_id = raw_matched if _is_non_empty_str(raw_matched) else None
+    order_items = _parse_order_items(data.get("order_items"))
+
     return CharacterResponse(
         text=text[:MAX_TEXT_LENGTH],
         emotion=normalize_emotion(emotion),
         gesture=normalize_gesture(gesture),
         is_fallback=False,
+        action=action,
+        matched_qa_id=matched_qa_id,
+        order_items=order_items,
     )
+
+
+def _parse_order_items(raw: object) -> tuple[OrderItemDelta, ...]:
+    """Defensively extract ``order_items`` from the parsed JSON.
+
+    Anything not shaped like a list of ``{"product_id": str, "quantity": int}``
+    objects is dropped rather than raising -- a malformed/missing order_items
+    field degrades to "nothing ordered this turn", never to FALLBACK_UNDERSTAND
+    (the field is optional; only text/emotion/gesture are required).
+    """
+    if not isinstance(raw, list):
+        return ()
+    items: list[OrderItemDelta] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        product_id = entry.get("product_id")
+        if not _is_non_empty_str(product_id):
+            continue
+        quantity = entry.get("quantity", 1)
+        if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
+            quantity = 1
+        items.append(OrderItemDelta(product_id, quantity))
+    return tuple(items)
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +226,24 @@ FACTCHAT_BASE_URL_ENV: str = "FACTCHAT_BASE_URL"
 FACTCHAT_MODEL_ENV: str = "FACTCHAT_MODEL"
 DEFAULT_FACTCHAT_BASE_URL: str = "https://factchat-cloud.mindlogic.ai/v1/gateway"
 DEFAULT_FACTCHAT_MODEL: str = "solar-pro3"
+
+# Local, fully-offline provider. Any OpenAI-compatible local server works — Ollama
+# (`ollama serve`, base URL http://localhost:11434/v1) or llama.cpp's llama-server
+# (http://localhost:8080/v1). No cloud, no API key required by default; the model
+# runs on the device (e.g. a small quantized multilingual model on a Raspberry Pi).
+# All values are overridable via environment so the same build runs cloud or local.
+LOCAL_BASE_URL_ENV: str = "LOCAL_LLM_BASE_URL"
+LOCAL_MODEL_ENV: str = "LOCAL_LLM_MODEL"
+LOCAL_API_KEY_ENV: str = "LOCAL_LLM_API_KEY"
+DEFAULT_LOCAL_BASE_URL: str = "http://localhost:11434/v1"
+DEFAULT_LOCAL_MODEL: str = "qwen2.5:1.5b-instruct"
+
+# Groq (OpenAI-compatible Chat Completions, cloud, requires a key from console.groq.com).
+GROQ_API_KEY_ENV: str = "GROQ_API_KEY"
+GROQ_BASE_URL_ENV: str = "GROQ_BASE_URL"
+GROQ_MODEL_ENV: str = "GROQ_MODEL"
+DEFAULT_GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
+DEFAULT_GROQ_MODEL: str = "openai/gpt-oss-120b"
 
 
 class GeminiUnavailableError(RuntimeError):
@@ -280,24 +334,37 @@ class OpenAICompatibleClient:
         api_key: str | None = None,
         model: str | None = None,
         base_url: str | None = None,
+        *,
+        require_api_key: bool = True,
+        path: str = "/chat/completions/",
+        api_key_env: str = FACTCHAT_API_KEY_ENV,
+        extra_payload: dict | None = None,
     ) -> None:
         self._api_key = (
-            api_key if api_key is not None else os.environ.get(FACTCHAT_API_KEY_ENV)
+            api_key if api_key is not None else os.environ.get(api_key_env)
         )
+        self._api_key_env = api_key_env
         self._model = model or os.environ.get(FACTCHAT_MODEL_ENV) or DEFAULT_FACTCHAT_MODEL
         self._base_url = (
             base_url
             or os.environ.get(FACTCHAT_BASE_URL_ENV)
             or DEFAULT_FACTCHAT_BASE_URL
         ).rstrip("/")
+        # A local server (Ollama / llama.cpp) needs no auth; a cloud gateway does.
+        self._require_api_key = require_api_key
+        self._path = path if path.startswith("/") else f"/{path}"
+        # Provider-specific extra fields merged into every request payload (e.g.
+        # Groq's `reasoning_effort` for gpt-oss models, to keep hidden reasoning
+        # tokens from eating the max_tokens budget and the per-minute token quota).
+        self._extra_payload = extra_payload or {}
         # Reused across calls so subsequent requests skip the TLS/connection setup
         # cost; created lazily on first use inside the event loop.
         self._http = None  # type: ignore[var-annotated]
 
     async def generate(self, prompt: str) -> RawResponse:
         """Issue one chat-completion request and return the assistant message text."""
-        if not self._api_key:
-            raise GeminiUnavailableError(f"{FACTCHAT_API_KEY_ENV} is not configured")
+        if self._require_api_key and not self._api_key:
+            raise GeminiUnavailableError(f"{self._api_key_env} is not configured")
 
         # Lazy import keeps httpx optional for pure-parsing imports.
         import httpx  # type: ignore[import-not-found]
@@ -306,17 +373,18 @@ class OpenAICompatibleClient:
             # Keep-alive connection pool reused for the process lifetime.
             self._http = httpx.AsyncClient(timeout=GEMINI_TIMEOUT_SECONDS + 5)
 
-        url = f"{self._base_url}/chat/completions/"
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
+        url = f"{self._base_url}{self._path}"
+        headers = {"Content-Type": "application/json"}
+        # Send bearer auth only when a key is present (local servers need none).
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
         payload = {
             "model": self._model,
             "messages": [{"role": "user", "content": prompt}],
             # Cap generation so worst-case latency stays bounded (Req 4.2 keeps the
             # text short anyway); the prompt also asks for 1-2 short sentences.
-            "max_tokens": 300,
+            "max_tokens": 2048,
+            **self._extra_payload,
         }
 
         response = await self._http.post(url, headers=headers, json=payload)
@@ -338,16 +406,56 @@ def _get_default_client() -> GeminiClient:
     """
     global _default_client
     if _default_client is None:
-        provider = (
-            os.environ.get(LLM_PROVIDER_ENV) or DEFAULT_LLM_PROVIDER
-        ).strip().lower()
-        if provider == "factchat":
-            logger.info("LLM provider: factchat (CNU API Gateway)")
-            _default_client = OpenAICompatibleClient()
-        else:
-            logger.info("LLM provider: gemini (google-genai)")
-            _default_client = GeminiFlashClient()
+        _default_client = build_client_for_provider(
+            (os.environ.get(LLM_PROVIDER_ENV) or DEFAULT_LLM_PROVIDER).strip().lower()
+        )
     return _default_client
+
+
+def build_client_for_provider(provider: str) -> GeminiClient:
+    """Construct the LLM client for a provider name (pure factory, no caching).
+
+    - ``factchat``: OpenAI-compatible CNU API Gateway (cloud, requires a key).
+    - ``groq``: OpenAI-compatible Groq Cloud API (cloud, requires a key).
+    - ``local``: OpenAI-compatible local server — Ollama or llama.cpp's
+      llama-server — for a fully-offline, on-device model. No API key required.
+    - anything else (default): Google Gemini directly.
+    """
+    if provider == "factchat":
+        logger.info("LLM provider: factchat (CNU API Gateway)")
+        return OpenAICompatibleClient()
+    if provider == "groq":
+        model = os.environ.get(GROQ_MODEL_ENV) or DEFAULT_GROQ_MODEL
+        base_url = os.environ.get(GROQ_BASE_URL_ENV) or DEFAULT_GROQ_BASE_URL
+        logger.info("LLM provider: groq (%s, model=%s)", base_url, model)
+        return OpenAICompatibleClient(
+            model=model,
+            base_url=base_url,
+            path="/chat/completions",
+            api_key_env=GROQ_API_KEY_ENV,
+            # gpt-oss models on Groq spend hidden "reasoning" tokens before the
+            # visible content; "low" keeps that spend small so the JSON reply
+            # fits inside max_tokens and free-tier per-minute token quota.
+            # A low temperature (Groq's default is ~1.0) makes the model follow
+            # the reply-language lock in prompt_builder.build reliably instead of
+            # spontaneously drifting into Korean/Malay mid-conversation on plain
+            # English input, which this model does under the default temperature.
+            extra_payload={"reasoning_effort": "low", "temperature": 0.3},
+        )
+    if provider == "local":
+        base_url = os.environ.get(LOCAL_BASE_URL_ENV) or DEFAULT_LOCAL_BASE_URL
+        model = os.environ.get(LOCAL_MODEL_ENV) or DEFAULT_LOCAL_MODEL
+        logger.info("LLM provider: local OpenAI-compatible (%s, model=%s)", base_url, model)
+        return OpenAICompatibleClient(
+            api_key=os.environ.get(LOCAL_API_KEY_ENV),
+            model=model,
+            base_url=base_url,
+            require_api_key=False,
+            path="/chat/completions",
+            api_key_env=LOCAL_API_KEY_ENV,
+        )
+    logger.info("LLM provider: gemini (google-genai)")
+    return GeminiFlashClient()
 
 
 async def complete(prompt: str, client: GeminiClient | None = None) -> RawResponse:

@@ -87,6 +87,12 @@ chromium_flags() {
     #   character (keeps the screen clean per 11.2/11.3).
     # --overscroll-history-navigation=0 and --hide-scrollbars : remove on-screen
     #   scrollbars where applicable (11.1/11.2).
+    # --ignore-gpu-blocklist / --enable-gpu-rasterization / --use-gl=egl : the
+    #   character is a real WebGL (three.js) 3D model now, not a 2D sprite --
+    #   these get GPU-accelerated WebGL working reliably on the Pi 5's Mesa/V3D
+    #   driver via Chromium's EGL backend (the default GL backend picked by
+    #   Chromium's built-in GPU blocklist is sometimes overly conservative on
+    #   the Pi and falls back to slow software rendering without this).
     cat <<'FLAGS'
 --kiosk
 --start-fullscreen
@@ -104,6 +110,9 @@ chromium_flags() {
 --fast-start
 --disable-component-update
 --autoplay-policy=no-user-gesture-required
+--ignore-gpu-blocklist
+--enable-gpu-rasterization
+--use-gl=egl
 FLAGS
 }
 

@@ -9,7 +9,7 @@ export type UIState = "idle" | "listening" | "processing" | "speaking" | "error"
 // one facial expression / body motion of the single 2D character (Req 5.6).
 // ---------------------------------------------------------------------------
 export const EMOTIONS = ["happy", "neutral", "surprised", "sad", "angry"] as const;
-export const GESTURES = ["wave", "idle", "point", "nod", "think"] as const;
+export const GESTURES = ["wave", "idle", "point", "nod", "think", "fly", "jump", "approach"] as const;
 
 export type Emotion = (typeof EMOTIONS)[number];
 export type Gesture = (typeof GESTURES)[number];
@@ -38,6 +38,8 @@ export interface SttProvider {
   // Optional: registers a callback for live interim transcripts emitted while the
   // user is still speaking, so the UI can show speech-to-text in real time.
   onPartial?(cb: (text: string) => void): void;
+  // Switches the recognized/spoken language (e.g. "ko-KR") for the next capture.
+  setLanguage(lang: string): void;
 }
 
 // Local (in-browser) text-to-speech engine. No data leaves the device (Req 6.2).

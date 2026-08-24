@@ -359,6 +359,220 @@ export class WebSpeechSttProvider implements SttProvider {
 }
 
 // ---------------------------------------------------------------------------
+// LocalSttProvider
+//
+// Records the microphone via MediaRecorder + a volume-based silence detector,
+// then posts the finished clip to the backend for fully-offline transcription
+// (faster-whisper -- see backend/stt.py). Used when STT_PROVIDER=local, e.g.
+// because the browser's built-in Web Speech API can't reach Google's speech
+// service (blocked network/extension) or fully-offline operation is wanted.
+//
+// Unlike WebSpeechSttProvider this has no interim/streaming results -- Whisper
+// here runs in one-shot batch mode over the whole clip -- so onPartial is a
+// no-op and the transcript only arrives once, after the clip is sent.
+// ---------------------------------------------------------------------------
+
+/** RMS amplitude (0..1) above which mic input counts as "speech" for the
+ * client-side end-of-speech detector (there is no server-side VAD feedback loop
+ * here; faster-whisper's own VAD filter still cleans up the final transcript). */
+const LOCAL_STT_SPEECH_THRESHOLD = 0.02;
+
+interface WindowWithWebkitAudioContext {
+  webkitAudioContext?: typeof AudioContext;
+}
+
+export class LocalSttProvider implements SttProvider {
+  private callback: ((r: SttResult) => void) | null = null;
+
+  private stream: MediaStream | null = null;
+  private recorder: MediaRecorder | null = null;
+  private audioCtx: AudioContext | null = null;
+  private rafId: number | null = null;
+
+  private noSpeechTimer: ReturnType<typeof setTimeout> | null = null;
+  private silenceTimer: ReturnType<typeof setTimeout> | null = null;
+  private maxCaptureTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private speechStarted = false;
+  private settled = false;
+
+  constructor(_lang: string = "en-US") {}
+
+  /**
+   * No-op: unlike the browser's Web Speech API, Whisper (backend/stt.py)
+   * always auto-detects the spoken language from the audio itself, so there is
+   * no recognition language to keep in sync here. Forcing one previously meant
+   * a customer's first non-English utterance was transcribed *as* English
+   * (garbled), which could never produce the characters needed to detect and
+   * switch away from English -- kept as a no-op only to satisfy SttProvider.
+   */
+  setLanguage(_lang: string): void {}
+
+  onResult(cb: (r: SttResult) => void): void {
+    this.callback = cb;
+  }
+
+  /** No interim transcripts in batch mode; kept as a no-op to satisfy SttProvider. */
+  onPartial(_cb: (text: string) => void): void {}
+
+  start(): void {
+    this.settled = false;
+    this.speechStarted = false;
+    void this.beginCapture();
+  }
+
+  stop(): void {
+    this.stopCapture();
+  }
+
+  private async beginCapture(): Promise<void> {
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      this.emit({ kind: "error", reason: "mic-unavailable" });
+      return;
+    }
+    if (this.settled) {
+      // stop() (or a timeout) already fired while permission was pending.
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    this.stream = stream;
+
+    const chunks: BlobPart[] = [];
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(stream);
+    } catch {
+      this.emit({ kind: "error", reason: "mic-unavailable" });
+      return;
+    }
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) chunks.push(event.data);
+    };
+    recorder.onstop = () => void this.finish(new Blob(chunks, { type: recorder.mimeType }));
+    this.recorder = recorder;
+    recorder.start();
+
+    this.setupSilenceDetection(stream);
+
+    // No speech at all after activation -> give up (Req 1.7 parity).
+    this.noSpeechTimer = setTimeout(() => {
+      if (!this.speechStarted) this.stopCapture();
+    }, NO_SPEECH_TIMEOUT_MS);
+
+    // Hard capture cap -> finalize whatever was captured (Req 1.6 parity).
+    this.maxCaptureTimer = setTimeout(() => this.stopCapture(), MAX_CAPTURE_MS);
+  }
+
+  private setupSilenceDetection(stream: MediaStream): void {
+    const ctor =
+      window.AudioContext ?? (window as unknown as WindowWithWebkitAudioContext).webkitAudioContext;
+    if (!ctor) return; // no Web Audio API -> falls back to the no-speech/max-capture timers only
+
+    const ctx = new ctor();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    this.audioCtx = ctx;
+
+    const data = new Uint8Array(analyser.fftSize);
+    const tick = (): void => {
+      analyser.getByteTimeDomainData(data);
+      let sumSquares = 0;
+      for (let i = 0; i < data.length; i++) {
+        const sample = (data[i] - 128) / 128;
+        sumSquares += sample * sample;
+      }
+      const rms = Math.sqrt(sumSquares / data.length);
+
+      if (rms > LOCAL_STT_SPEECH_THRESHOLD) {
+        this.speechStarted = true;
+        this.clearTimer("noSpeech");
+        this.clearTimer("silence");
+      } else if (this.speechStarted && this.silenceTimer === null) {
+        this.silenceTimer = setTimeout(() => this.stopCapture(), END_OF_SPEECH_SILENCE_MS);
+      }
+      this.rafId = requestAnimationFrame(tick);
+    };
+    this.rafId = requestAnimationFrame(tick);
+  }
+
+  private stopCapture(): void {
+    this.clearAllTimers();
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+    if (this.audioCtx) {
+      void this.audioCtx.close();
+      this.audioCtx = null;
+    }
+    if (this.recorder && this.recorder.state !== "inactive") {
+      this.recorder.stop(); // triggers onstop -> finish()
+    } else if (!this.settled) {
+      // Never actually started recording (e.g. stop() called before the mic
+      // permission prompt resolved) -- settle here since onstop will never fire.
+      this.emit({ kind: "no-match" });
+    }
+    this.stream?.getTracks().forEach((track) => track.stop());
+    this.stream = null;
+  }
+
+  private async finish(blob: Blob): Promise<void> {
+    if (!this.speechStarted) {
+      this.emit({ kind: "no-match" });
+      return;
+    }
+    try {
+      const form = new FormData();
+      form.append("audio", blob, "clip.webm");
+      const response = await fetch("/api/stt/transcribe", { method: "POST", body: form });
+      if (!response.ok) {
+        this.emit({ kind: "error", reason: "network" });
+        return;
+      }
+      const data = (await response.json()) as { text?: string };
+      const text = (data.text ?? "").trim();
+      this.emit(text ? { kind: "transcript", text } : { kind: "no-match" });
+    } catch {
+      this.emit({ kind: "error", reason: "network" });
+    }
+  }
+
+  private emit(result: SttResult): void {
+    if (this.settled) return;
+    this.settled = true;
+    this.callback?.(result);
+  }
+
+  private clearTimer(which: "noSpeech" | "silence" | "maxCapture"): void {
+    const map = {
+      noSpeech: () => {
+        if (this.noSpeechTimer) clearTimeout(this.noSpeechTimer);
+        this.noSpeechTimer = null;
+      },
+      silence: () => {
+        if (this.silenceTimer) clearTimeout(this.silenceTimer);
+        this.silenceTimer = null;
+      },
+      maxCapture: () => {
+        if (this.maxCaptureTimer) clearTimeout(this.maxCaptureTimer);
+        this.maxCaptureTimer = null;
+      },
+    } as const;
+    map[which]();
+  }
+
+  private clearAllTimers(): void {
+    this.clearTimer("noSpeech");
+    this.clearTimer("silence");
+    this.clearTimer("maxCapture");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // WebSpeechTtsEngine
 // ---------------------------------------------------------------------------
 

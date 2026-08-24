@@ -1,33 +1,98 @@
 import QRCode from "qrcode";
-import { createCharacterRenderer } from "./character.js";
+import { createCharacterRenderer, type CharacterRenderer } from "./character.js";
 import { ChatClient, buildWsUrl } from "./chat.js";
 import { createChatLog } from "./chatlog.js";
-import { analyzeTranscript, createCustomerSession, getCustomerSession, getReadyOrders, EventVideoQueue, loadMediaConfig, StoreEventClient, type StoreEvent } from "./hologram.js";
+import { splitIntoBeats } from "./emotion-cues.js";
+import { analyzeTranscript, createCustomerSession, getActiveOrders, getCustomerSession, getReadyOrders, getSttConfig, EventVideoQueue, loadMediaConfig, StoreEventClient, type BoardOrder, type StoreEvent } from "./hologram.js";
 import { KioskController, createDomKioskView } from "./kiosk.js";
-import { WebSpeechSttProvider, WebSpeechTtsEngine } from "./speech.js";
+import { LocalSttProvider, WebSpeechSttProvider, WebSpeechTtsEngine } from "./speech.js";
+import type { SttProvider } from "./types.js";
 
 const STORE_ID = "demo";
+const ORDER_BOARD_EVENTS = new Set([
+  "new_order", "order_accepted", "order_preparing", "order_ready", "order_completed", "order_rejected",
+]);
 const readyCopy: Record<string, (number: number) => string> = {
   en: (number) => `Order number ${number}! Your order is ready!`,
   ko: (number) => `${number}번 고객님! 주문하신 상품이 준비되었습니다!`,
   ms: (number) => `Pesanan nombor ${number}! Pesanan anda sudah siap!`,
 };
 
+const MOTION_SHOWCASE_MOODS: [string, string][] = [
+  ["neutral", "idle"], ["happy", "idle"], ["sad", "idle"], ["angry", "idle"], ["surprised", "idle"],
+];
+const MOTION_SHOWCASE_GESTURES: [string, string][] = [
+  ["happy", "wave"], ["happy", "point"], ["happy", "nod"], ["neutral", "think"],
+  ["happy", "fly"], ["surprised", "jump"], ["happy", "approach"],
+];
+
+// A sample multi-sentence reply exercising every emotion-cue rule in
+// emotion-cues.ts, so the "beats within one answer" behavior is visible too:
+// a question (head-tilt), an exclamation/offer (wings-out bounce), a
+// greeting (wave), and a price mention (point) -- see splitIntoBeats.
+const MOTION_SHOWCASE_REPLY =
+  "Have you tried our mangoes? They're on special today! Hi there, welcome to the stall. The price is RM 5.";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Dev-only helper: plays every emotion's idle personality, every gesture's
+ * motion, and a sample multi-sentence reply (to show emotion-cues.ts changing
+ * pose mid-answer) back to back, so someone with the page open can watch the
+ * full set without needing to script real conversation turns. Exposed on
+ * `window` (not gated behind ?debug=true) so it's reachable from the devtools
+ * console on an already-open tab. Not part of the Kiosk_UI's normal operation.
+ */
+function exposeMotionShowcase(renderer: CharacterRenderer): void {
+  // Also expose the renderer itself so a single render(emotion, gesture) call
+  // can be tried directly from the console, not just the full cycle.
+  (window as unknown as { __vertewRenderer: CharacterRenderer }).__vertewRenderer = renderer;
+  (window as unknown as { __vertewCycleMotions: () => Promise<void> }).__vertewCycleMotions = async () => {
+    for (const [emotion, gesture] of MOTION_SHOWCASE_MOODS) {
+      renderer.render(emotion, gesture);
+      await sleep(6000); // long enough to see at least one idle flourish
+    }
+    for (const [emotion, gesture] of MOTION_SHOWCASE_GESTURES) {
+      renderer.render(emotion, gesture);
+      await sleep(2600); // just past GESTURE_HOLD_MS so it fully settles
+    }
+    const beats = splitIntoBeats(MOTION_SHOWCASE_REPLY, { emotion: "neutral", gesture: "idle" });
+    for (const beat of beats) {
+      renderer.render(beat.emotion, beat.gesture);
+      await sleep(2600);
+    }
+    renderer.playIdle();
+  };
+}
+
 export async function startKiosk(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const displayMode = params.get("display") === "tablet" ? "tablet" : "hologram";
-  const debug = params.get("debug") !== "false";
+  // Off by default -- the real 7" kiosk display never passes ?debug=true, so
+  // the demo control panel only appears when explicitly requested for testing.
+  const debug = params.get("debug") === "true";
   document.body.dataset.display = displayMode;
   document.body.classList.toggle("debug-enabled", debug);
 
-  const [media, session] = await Promise.all([loadMediaConfig(STORE_ID), restoreSession(STORE_ID)]);
+  const [media, session, sttConfig] = await Promise.all([
+    loadMediaConfig(STORE_ID),
+    restoreSession(STORE_ID),
+    getSttConfig(),
+  ]);
   const sessionId = session.id;
   window.sessionStorage.setItem(`vertew-session-${STORE_ID}`, sessionId);
   const qrUrl = `${window.location.origin}/order/store/${STORE_ID}?session=${sessionId}`;
   await renderQr(qrUrl);
 
   const renderer = createCharacterRenderer();
-  const stt = new WebSpeechSttProvider("en-US");
+  exposeMotionShowcase(renderer);
+  // "local": record + POST to the backend (faster-whisper, fully offline) --
+  // used when the browser's own Web Speech API can't reach Google's speech
+  // service. Otherwise fall back to the browser's built-in recognizer.
+  const stt: SttProvider =
+    sttConfig.provider === "local" ? new LocalSttProvider("en-US") : new WebSpeechSttProvider("en-US");
   const tts = new WebSpeechTtsEngine("en-US");
   const view = createDomKioskView();
   const chatLog = createChatLog();
@@ -73,7 +138,15 @@ export async function startKiosk(): Promise<void> {
   events.connect();
 
   async function handleEvent(event: StoreEvent): Promise<void> {
-    if (["customer_detected", "customer_close"].includes(event.type)) videoQueue.enqueue(event.type);
+    if (event.type === "customer_close") videoQueue.enqueue(event.type);
+    // customer_detected used to play the greeting video; a 3D greeter flourish
+    // (wave -> excited jump -> approach) draws attention instead, since
+    // Higgsfield-generated video attempts from this line-art style came back
+    // motionless (tested with two different models). Only while idle, so an
+    // active conversation is never interrupted by a re-triggered sensor.
+    if (event.type === "customer_detected" && controller.state === "idle") {
+      void playGreeterSequence();
+    }
     if (event.type === "show_qr") showQr(true);
     if (event.type === "language_changed" && event.session_id === sessionId) {
       currentLanguage = String(event.payload.language ?? "en");
@@ -92,7 +165,67 @@ export async function startKiosk(): Promise<void> {
       if (orderId) announcedOrders.add(orderId);
       await announceReady(orderNumber, language);
     }
+    if (ORDER_BOARD_EVENTS.has(event.type)) void refreshOrderBoard();
   }
+
+  // Attention-grabbing beat played once when a customer is first detected --
+  // see the handleEvent comment above for why this is 3D motion, not video.
+  const GREETER_SEQUENCE: [string, string][] = [
+    ["happy", "wave"], ["surprised", "jump"], ["happy", "approach"],
+  ];
+  async function playGreeterSequence(): Promise<void> {
+    for (const [emotion, gesture] of GREETER_SEQUENCE) {
+      if (controller.state !== "idle") return; // a conversation started mid-sequence
+      renderer.render(emotion, gesture);
+      await sleep(2500);
+    }
+    if (controller.state === "idle") renderer.playIdle();
+  }
+
+  const ORDER_STATUS_LABEL: Record<string, string> = {
+    PENDING: "NEW", ACCEPTED: "ACCEPTED", PREPARING: "PREPARING", READY: "READY",
+  };
+  const ORDER_STATUS_BADGE_CLASS: Record<string, string> = {
+    PENDING: "order-badge--pending", ACCEPTED: "order-badge--accepted",
+    PREPARING: "order-badge--preparing", READY: "order-badge--ready",
+  };
+
+  function renderOrderBoard(orders: BoardOrder[]): void {
+    const list = required("order-board-list");
+    list.textContent = "";
+    if (orders.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "order-board-empty";
+      empty.textContent = "No orders in progress.";
+      list.appendChild(empty);
+      return;
+    }
+    for (const order of [...orders].sort((a, b) => b.order_number - a.order_number)) {
+      const card = document.createElement("article");
+      card.className = "order-card";
+
+      const head = document.createElement("div");
+      head.className = "order-card-head";
+      const num = document.createElement("b");
+      num.textContent = `#${order.order_number}`;
+      const badge = document.createElement("span");
+      badge.className = `order-badge ${ORDER_STATUS_BADGE_CLASS[order.status] ?? "order-badge--pending"}`;
+      badge.textContent = ORDER_STATUS_LABEL[order.status] ?? order.status;
+      head.append(num, badge);
+
+      const items = document.createElement("div");
+      items.className = "order-items";
+      items.textContent = order.items.map((item) => `${item.product_name.en ?? item.product_id} ×${item.quantity}`).join(", ");
+
+      card.append(head, items);
+      list.appendChild(card);
+    }
+  }
+
+  const refreshOrderBoard = async (): Promise<void> => {
+    try { renderOrderBoard(await getActiveOrders(STORE_ID)); }
+    catch { /* keep showing the last known board; retried on the next tick */ }
+  };
 
   let readyDismissTimer: ReturnType<typeof window.setTimeout> | null = null;
   async function announceReady(orderNumber: number, language: string): Promise<void> {
@@ -129,6 +262,18 @@ export async function startKiosk(): Promise<void> {
   required("debug-ko").addEventListener("click", () => { currentLanguage = "ko"; required("language-label").textContent = "KO"; });
   required("debug-en").addEventListener("click", () => { currentLanguage = "en"; required("language-label").textContent = "EN"; });
   required("debug-ms").addEventListener("click", () => { currentLanguage = "ms"; required("language-label").textContent = "MS"; });
+  required("debug-transcript-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const input = required<HTMLInputElement>("debug-transcript-input");
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    // Bypass the mic entirely: fake a tap (if needed) then feed the typed text
+    // straight in as if the Speech_Module had produced it, so the rest of the
+    // flow (server round-trip, character render, TTS) can be tested without STT.
+    if (controller.state === "idle") controller.onTap();
+    controller.onTranscript(text);
+  });
   const recoverReadyOrder = async () => {
     try {
       const readyOrders = await getReadyOrders(STORE_ID);
@@ -141,6 +286,8 @@ export async function startKiosk(): Promise<void> {
   };
   window.setInterval(() => void recoverReadyOrder(), 3000);
   void recoverReadyOrder();
+  window.setInterval(() => void refreshOrderBoard(), 3000);
+  void refreshOrderBoard();
   renderer.playIdle();
 }
 
@@ -165,6 +312,10 @@ async function restoreSession(storeId: string): Promise<{ id: string; language: 
 async function renderQr(value: string): Promise<void> {
   const dataUrl = await QRCode.toDataURL(value, { width: 420, margin: 2, color: { dark: "#05060aff", light: "#ffffffff" } });
   document.querySelectorAll<HTMLImageElement>(".session-qr").forEach((image) => { image.src = dataUrl; });
+  // Also show the plain link so the same machine can open/copy it directly
+  // without needing an actual phone to scan the code (handy for dev/testing).
+  const link = document.getElementById("qr-link") as HTMLAnchorElement | null;
+  if (link) { link.href = value; link.textContent = value; }
 }
 
 function showQr(show: boolean): void { document.body.classList.toggle("qr-expanded", show); }

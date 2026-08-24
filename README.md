@@ -92,6 +92,21 @@ Open:
 
 No Raspberry Pi or AI API key is required for the local demo.
 
+### Raspberry Pi deployment
+
+On the Pi itself, one command sets everything up (venv, dependencies, all
+three frontend builds, systemd services, kiosk autostart on boot):
+
+```bash
+git clone https://github.com/Eleven-Up/vertew_8.17ver.git
+cd vertew_8.17ver
+./scripts/install.sh
+```
+
+See [`scripts/README.md`](scripts/README.md) for hardware notes (microphone,
+sensor wiring, pre-seeding the offline speech model) and the manual step-by-step
+if you'd rather not run the installer.
+
 ### Optional AI configuration
 
 Copy `backend/.env.example` to `backend/.env`. Never commit the real `.env`.
@@ -238,6 +253,21 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - Mock Console: `http://localhost:8000/mock.html`
 
 로컬 데모에는 Raspberry Pi나 AI API Key가 필요하지 않습니다.
+
+### 라즈베리파이 배포
+
+라즈베리파이에서는 아래 한 줄만 실행하면 venv 설정, 프론트엔드 3종 빌드,
+systemd 서비스 등록, 부팅 시 자동 실행까지 전부 처리됩니다:
+
+```bash
+git clone https://github.com/Eleven-Up/vertew_8.17ver.git
+cd vertew_8.17ver
+./scripts/install.sh
+```
+
+마이크·센서 연결, 오프라인 음성인식 모델 미리 받아두기 등 하드웨어 관련
+안내는 [`scripts/README.md`](scripts/README.md)를 참고하세요. 스크립트 없이
+수동으로 설치하는 방법도 같은 문서에 있습니다.
 
 ### 선택형 AI 설정
 

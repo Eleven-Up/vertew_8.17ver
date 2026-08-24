@@ -14,6 +14,8 @@
 
 import type {
   CharacterResponse,
+  Emotion,
+  Gesture,
   SttProvider,
   SttResult,
   TtsEngine,
@@ -21,6 +23,8 @@ import type {
 } from "./types.js";
 import { isNonEmptyText, isNonEmptyTranscript } from "./speech.js";
 import type { CharacterRenderer } from "./character.js";
+import { normalizeEmotion, normalizeGesture } from "./character.js";
+import { splitIntoBeats, type Beat } from "./emotion-cues.js";
 
 /** Silence (no recognized speech) that ends an active conversation, in ms. */
 export const SILENCE_TO_IDLE_MS = 60_000;
@@ -40,10 +44,10 @@ export type ErrorKind = "mic" | "stt-empty" | "network" | "tts";
 
 /** User-facing copy for each {@link ErrorKind}. */
 export const ERROR_MESSAGES: Record<ErrorKind, string> = {
-  mic: "마이크를 사용할 수 없어요. 권한을 확인하고 다시 시도해 주세요.",
-  "stt-empty": "잘 못 들었어요. 화면을 탭하고 다시 말씀해 주세요.",
-  network: "연결이 원활하지 않아요. 잠시 후 다시 시도해 주세요.",
-  tts: "음성을 재생할 수 없어요.",
+  mic: "Microphone unavailable. Please check permissions and try again.",
+  "stt-empty": "Sorry, I didn't catch that. Tap the screen and try again.",
+  network: "Connection trouble. Please try again in a moment.",
+  tts: "Couldn't play the voice response.",
 };
 
 // ---------------------------------------------------------------------------
@@ -174,8 +178,7 @@ export class KioskController {
   onServerResponse(r: CharacterResponse): void {
     if (this._state !== "processing") return;
     this.setState("speaking");
-    this.renderer.render(r.emotion, r.gesture);
-    this.speak(r.text);
+    this.speak(r.text, normalizeEmotion(r.emotion), normalizeGesture(r.gesture));
   }
 
   /** Voice output finished. */
@@ -233,21 +236,46 @@ export class KioskController {
     this.returnToIdle();
   }
 
-  private speak(text: string): void {
+  /**
+   * Speaks `text` as a sequence of per-sentence "beats" (see emotion-cues.ts)
+   * so the character's emotion/gesture can change mid-reply -- e.g. a
+   * head-tilt on a question, a bounce on an exclamation -- rather than
+   * holding one pose for the whole answer. `fallbackEmotion`/`fallbackGesture`
+   * are the server's own choice for this turn, used for any sentence that
+   * matches no specific cue.
+   */
+  private speak(text: string, fallbackEmotion: Emotion, fallbackGesture: Gesture): void {
     if (!isNonEmptyText(text)) {
+      this.renderer.render(fallbackEmotion, fallbackGesture);
       this.renderer.stopLipSync();
       this.lastInteractionAt = Date.now();
       this.finishSpeaking();
       return;
     }
     if (!this.tts.isAvailable()) {
+      this.renderer.render(fallbackEmotion, fallbackGesture);
       this.showError("tts");
       return;
     }
+    const beats = splitIntoBeats(text, { emotion: fallbackEmotion, gesture: fallbackGesture });
     this.renderer.startLipSync();
+    this.speakBeat(beats, 0);
+  }
+
+  /** Renders and speaks one beat, then recurses to the next -- lip-sync stays
+   * on continuously across the whole sequence (started in speak(), stopped by
+   * the eventual onTtsComplete()) so it doesn't stutter between sentences. */
+  private speakBeat(beats: Beat[], index: number): void {
+    if (this._state !== "speaking") return; // a prior beat's failure already ended the turn
+    if (index >= beats.length) {
+      this.onTtsComplete();
+      return;
+    }
+    const beat = beats[index];
+    this.renderer.render(beat.emotion, beat.gesture);
     this.tts
-      .speak(text)
-      .then(() => this.onTtsComplete())
+      .speak(beat.text)
+      .then(() => this.speakBeat(beats, index + 1))
       .catch(() => {
         if (this._state === "speaking") this.showError("tts");
       });
@@ -267,6 +295,7 @@ export class KioskController {
     this.view.clearErrorBanner();
     this.setState("listening");
     this.view.showListeningIndicator();
+    this.renderer.playListening();
     this.stt.start();
   }
 

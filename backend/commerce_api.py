@@ -1,5 +1,6 @@
 """MVP menu, customer-session, and order REST API."""
 
+import re
 from dataclasses import asdict
 from typing import Literal
 
@@ -38,6 +39,8 @@ class LanguageUpdate(BaseModel):
 class OrderItemCreate(BaseModel):
     product_id: str = Field(min_length=1, max_length=100)
     quantity: int = Field(ge=1, le=99)
+    # Free-text special request for this item, e.g. "no cilantro please".
+    note: str = Field(default="", max_length=200)
 
 
 class OrderCreate(BaseModel):
@@ -52,8 +55,63 @@ class OrderStatusUpdate(BaseModel):
     status: OrderStatus
 
 
+class DraftItemsUpdate(BaseModel):
+    items: list[OrderItemCreate]
+
+
+class ProductWrite(BaseModel):
+    """Vendor menu-editor submission: create or fully replace one listing's
+    name/description/price/image/stock. Distinct from the assistant-grounding
+    fields (spice/ingredients/allergens) edited via /admin/products."""
+
+    name_en: str = Field(min_length=1, max_length=100)
+    name_ko: str = Field(default="", max_length=100)
+    name_ms: str = Field(default="", max_length=100)
+    description_en: str = Field(default="", max_length=500)
+    description_ko: str = Field(default="", max_length=500)
+    description_ms: str = Field(default="", max_length=500)
+    price_minor: int = Field(ge=0, le=100_000_00)
+    image: str = Field(default="", max_length=1000)
+    stock_count: int = Field(ge=0, le=100_000)
+    available: bool = True
+    # Provenance, e.g. "Sarawak, Malaysia" -- shown to the customer and usable
+    # by the assistant for "where is this from?" questions.
+    origin_en: str = Field(default="", max_length=200)
+    origin_ko: str = Field(default="", max_length=200)
+    origin_ms: str = Field(default="", max_length=200)
+
+
 def _payload(value):
     return asdict(value)
+
+
+def _lang_dict(en: str, ko: str, ms: str) -> dict[str, str]:
+    """Build a per-language dict from vendor-form fields, keeping only the
+    languages actually filled in (mirrors the /admin products page)."""
+    values = {"en": en.strip()} if en.strip() else {}
+    if ko.strip():
+        values["ko"] = ko.strip()
+    if ms.strip():
+        values["ms"] = ms.strip()
+    return values
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+    return slug or "item"
+
+
+def _unique_product_id(store: DataStore, store_id: str, name_en: str) -> str:
+    """Derive a stable product id from the English name, disambiguating against
+    the store's existing catalog (e.g. "mango", then "mango-2")."""
+    base = _slugify(name_en)
+    existing = {product.id for product in store.list_products(store_id)}
+    if base not in existing:
+        return base
+    suffix = 2
+    while f"{base}-{suffix}" in existing:
+        suffix += 1
+    return f"{base}-{suffix}"
 
 
 @router.get("/stores/{store_id}/menu")
@@ -62,6 +120,54 @@ def get_menu(store_id: str, store: DataStore = Depends(get_data_store)) -> dict:
     if not products:
         raise HTTPException(404, "Store not found or menu is empty")
     return {"store_id": store_id, "products": [_payload(product) for product in products]}
+
+
+@router.post("/stores/{store_id}/products", status_code=201)
+def create_product(store_id: str, body: ProductWrite, store: DataStore = Depends(get_data_store)) -> dict:
+    """Vendor menu editor: add a new menu item."""
+    product_id = _unique_product_id(store, store_id, body.name_en)
+    product = store.create_product(
+        store_id,
+        product_id,
+        name=_lang_dict(body.name_en, body.name_ko, body.name_ms),
+        description=_lang_dict(body.description_en, body.description_ko, body.description_ms),
+        price_minor=body.price_minor,
+        image=body.image,
+        stock_count=body.stock_count,
+        available=body.available,
+        origin=_lang_dict(body.origin_en, body.origin_ko, body.origin_ms),
+    )
+    return _payload(product)
+
+
+@router.patch("/stores/{store_id}/products/{product_id}")
+def update_product_listing(
+    store_id: str, product_id: str, body: ProductWrite, store: DataStore = Depends(get_data_store)
+) -> dict:
+    """Vendor menu editor: update an existing item's name/description/price/
+    image/stock/origin/availability."""
+    product = store.update_product_listing(
+        store_id,
+        product_id,
+        name=_lang_dict(body.name_en, body.name_ko, body.name_ms),
+        description=_lang_dict(body.description_en, body.description_ko, body.description_ms),
+        price_minor=body.price_minor,
+        image=body.image,
+        stock_count=body.stock_count,
+        available=body.available,
+        origin=_lang_dict(body.origin_en, body.origin_ko, body.origin_ms),
+    )
+    if product is None:
+        raise HTTPException(404, "Product not found")
+    return _payload(product)
+
+
+@router.delete("/stores/{store_id}/products/{product_id}", status_code=204)
+def delete_product(store_id: str, product_id: str, store: DataStore = Depends(get_data_store)) -> None:
+    """Vendor menu editor: remove a menu item. Past orders keep their own copy
+    of the product name/price, so this does not affect order history."""
+    if not store.delete_product(store_id, product_id):
+        raise HTTPException(404, "Product not found")
 
 
 @router.get("/stores/{store_id}/media")
@@ -109,13 +215,81 @@ async def update_language(session_id: str, body: LanguageUpdate, store: DataStor
     return _payload(session)
 
 
+def _resolve_draft(session_id: str, store: DataStore) -> dict:
+    """Shared by GET/PATCH draft: resolve the session's draft item ids against
+    the product catalog into the priced view the payment page renders."""
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    product_map = {product.id: product for product in store.list_products(session.store_id)}
+    items = store.get_draft_items(session_id)
+    resolved = []
+    total = 0
+    for product_id, entry in items.items():
+        product = product_map.get(product_id)
+        if product is None:
+            continue  # stale/removed product id -- skip rather than error
+        quantity = entry["quantity"]
+        resolved.append({
+            "product_id": product_id,
+            "quantity": quantity,
+            "note": entry.get("note", ""),
+            "name": product.name,
+            "unit_price_minor": product.price_minor,
+        })
+        total += product.price_minor * quantity
+    return {"session_id": session_id, "items": resolved, "total_minor": total, "currency": "MYR"}
+
+
+@router.get("/sessions/{session_id}/draft")
+def get_draft(session_id: str, store: DataStore = Depends(get_data_store)) -> dict:
+    """The customer's in-progress order, as recognized so far from the voice
+    conversation (or edited on the payment page) -- not yet paid/vendor-visible."""
+    return _resolve_draft(session_id, store)
+
+
+@router.patch("/sessions/{session_id}/draft")
+def update_draft(
+    session_id: str, body: DraftItemsUpdate, store: DataStore = Depends(get_data_store)
+) -> dict:
+    """Payment-page quantity/remove edits: an absolute replace of the draft
+    (omit an item entirely to remove it), not a delta."""
+    if store.get_session(session_id) is None:
+        raise HTTPException(404, "Session not found")
+    store.set_draft_items(
+        session_id,
+        {item.product_id: {"quantity": item.quantity, "note": item.note} for item in body.items},
+    )
+    return _resolve_draft(session_id, store)
+
+
+@router.post("/sessions/{session_id}/draft/checkout", status_code=201)
+async def checkout_draft(session_id: str, store: DataStore = Depends(get_data_store)):
+    """Mock payment: turn the draft into a real order (vendor-visible, gets an
+    order number) and broadcast it exactly like a directly-placed order."""
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    try:
+        order = store.checkout_draft(session.store_id, session_id, session.language)
+    except ValueError:
+        raise HTTPException(409, "Nothing to pay for -- the draft order is empty") from None
+    except KeyError as exc:
+        raise HTTPException(404, str(exc.args[0])) from None
+    payload = _payload(order)
+    await manager.broadcast(
+        order.store_id, "new_order", payload, session_id=order.session_id
+    )
+    return payload
+
+
 @router.post("/orders", status_code=201)
 async def create_order(body: OrderCreate, store: DataStore = Depends(get_data_store)):
     try:
         order = store.create_order(
             body.store_id,
             body.session_id,
-            [(item.product_id, item.quantity) for item in body.items],
+            [(item.product_id, item.quantity, item.note) for item in body.items],
             body.customer_language,
             body.order_source,
         )
