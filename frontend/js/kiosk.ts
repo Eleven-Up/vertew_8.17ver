@@ -32,6 +32,12 @@ export const SILENCE_TO_IDLE_MS = 60_000;
 /** Budget for returning to idle after a voice reply or error banner (Req 6.5). */
 export const RETURN_TO_IDLE_MS = 1000;
 
+/** How long the "ready" beat holds before the character actually starts
+ * talking -- a brief, deliberate pause once the reply has arrived so the
+ * state is perceptible (not just a same-tick flash) and the turn reads as a
+ * natural "got it, here's my answer" rather than an instant blurt. */
+export const READY_TO_SPEAK_MS = 400;
+
 /** DOM ids managed by {@link DomKioskView}. */
 export const LISTENING_INDICATOR_ID = "listening-indicator";
 export const ERROR_BANNER_ID = "error-banner";
@@ -127,6 +133,7 @@ export class KioskController {
   private conversationActive = false;
   private lastInteractionAt = 0;
   private returnTimer: ReturnType<typeof setTimeout> | null = null;
+  private readyTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(deps: KioskControllerDeps) {
     this.stt = deps.stt;
@@ -137,6 +144,7 @@ export class KioskController {
     this.onStateChange = deps.onStateChange;
 
     this.stt.onResult((r) => this.handleSttResult(r));
+    this.stt.onTranscribing?.(() => this.handleTranscribing());
 
     this.view.hideListeningIndicator();
     this.view.clearErrorBanner();
@@ -168,13 +176,22 @@ export class KioskController {
     this.enterListening();
   }
 
-  /** A transcript from the Speech_Module (meaningful only while listening). */
+  /** Capture has ended and the Speech_Module is turning it into text (only
+   * fired between listening and the eventual transcript/no-match/error). */
+  private handleTranscribing(): void {
+    if (this._state !== "listening") return;
+    this.view.hideListeningIndicator();
+    this.setState("understanding");
+  }
+
+  /** A transcript from the Speech_Module (meaningful while listening or, more
+   * commonly, once handleTranscribing has moved the state to understanding). */
   onTranscript(
     text: string,
     detectedLanguage?: string,
     languageConfidence?: number,
   ): void {
-    if (this._state !== "listening") return;
+    if (this._state !== "listening" && this._state !== "understanding") return;
     if (!isNonEmptyTranscript(text)) {
       this.handleNoMatch();
       return;
@@ -182,15 +199,23 @@ export class KioskController {
     this.lastInteractionAt = Date.now();
     this.stt.stop();
     this.view.hideListeningIndicator();
-    this.setState("processing");
+    this.setState("thinking");
     this.onSendTranscript?.(text, detectedLanguage, languageConfidence);
   }
 
-  /** A response from the Conversation_Server (meaningful only while processing). */
+  /** A response from the Conversation_Server (meaningful only while thinking).
+   * Holds briefly in "ready" (Req: a perceptible got-it-here's-my-answer beat)
+   * before the character actually starts talking. */
   onServerResponse(r: CharacterResponse): void {
-    if (this._state !== "processing") return;
-    this.setState("speaking");
-    this.speak(r.text, normalizeEmotion(r.emotion), normalizeGesture(r.gesture));
+    if (this._state !== "thinking") return;
+    this.setState("ready");
+    this.clearReadyTimer();
+    this.readyTimer = setTimeout(() => {
+      this.readyTimer = null;
+      if (this._state !== "ready") return; // e.g. showError fired during the beat
+      this.setState("speaking");
+      this.speak(r.text, normalizeEmotion(r.emotion), normalizeGesture(r.gesture));
+    }, READY_TO_SPEAK_MS);
   }
 
   /** Voice output finished. */
@@ -203,6 +228,7 @@ export class KioskController {
 
   /** Show an error banner, end the conversation, and recover to idle. */
   showError(kind: ErrorKind): void {
+    this.clearReadyTimer();
     this.stt.stop();
     this.renderer.stopLipSync();
     this.view.hideListeningIndicator();
@@ -217,7 +243,7 @@ export class KioskController {
   // -------------------------------------------------------------------------
 
   private handleSttResult(r: SttResult): void {
-    if (this._state !== "listening") return;
+    if (this._state !== "listening" && this._state !== "understanding") return;
     switch (r.kind) {
       case "transcript":
         this.onTranscript(r.text, r.detectedLanguage, r.languageConfidence);
@@ -320,6 +346,7 @@ export class KioskController {
 
   private returnToIdle(): void {
     this.clearReturnTimer();
+    this.clearReadyTimer();
     this.conversationActive = false;
     this.setState("idle");
     this.view.hideListeningIndicator();
@@ -339,6 +366,13 @@ export class KioskController {
     if (this.returnTimer !== null) {
       clearTimeout(this.returnTimer);
       this.returnTimer = null;
+    }
+  }
+
+  private clearReadyTimer(): void {
+    if (this.readyTimer !== null) {
+      clearTimeout(this.readyTimer);
+      this.readyTimer = null;
     }
   }
 }

@@ -28,7 +28,6 @@
 
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { eases } from "animejs";
 import {
   DEFAULT_EMOTION,
   DEFAULT_GESTURE,
@@ -39,17 +38,56 @@ import {
 } from "./types.js";
 
 /**
- * anime.js easing curves used to shape progress (`p`/`t` in [0,1]) for the
- * punchier, more overshoot-y gesture motion below -- swapped in for the
- * plain `1 - Math.cos(...)` ease-outs the hand-rolled motion used to use, so
- * a lean/tilt/spin snaps past its rest point and springs back rather than
- * gliding straight in. These are pure `(t) => number` functions (no DOM/CSS
- * involved), so they drop directly into the per-frame position/rotation math
- * below without needing an anime.js timeline or target.
+ * Punchier, more overshoot-y easing curves for the gesture motion below --
+ * shaping progress (`p`/`t` in [0,1]) so a lean/tilt/spin snaps past its rest
+ * point and springs back, instead of gliding straight in via a plain
+ * `1 - Math.cos(...)` ease-out.
+ *
+ * These formulas are ported directly from anime.js's outBack/outElastic/
+ * outBounce (rather than depending on the `animejs` package itself) so this
+ * renderer has no dependency on an external ESM package's own JS-engine
+ * requirements -- this runs on the kiosk's actual device, including older
+ * ARM boards (e.g. Raspberry Pi 4) with an older bundled Chromium than a dev
+ * machine, where a newer npm package can quietly fail to evaluate at all.
+ * The math itself is plain arithmetic, so it needs nothing beyond what the
+ * rest of this already-running bundle needs.
  */
-const EASE_OUT_BACK = eases.outBack(2.4);
-const EASE_OUT_ELASTIC = eases.outElastic(1.15, 0.45);
-const EASE_OUT_BOUNCE = eases.outBounce;
+function easeOutBack(overshoot: number): (t: number) => number {
+  return (t) => {
+    const u = 1 - t;
+    return 1 - ((overshoot + 1) * u * u * u - overshoot * u * u);
+  };
+}
+
+function easeOutElastic(amplitude: number, period: number): (t: number) => number {
+  const a = Math.min(10, Math.max(1, amplitude));
+  const p = Math.min(2, Math.max(0.000001, period));
+  const s = (p / (2 * Math.PI)) * Math.asin(1 / a);
+  const e = (2 * Math.PI) / p;
+  return (t) => {
+    if (t === 0) return 0;
+    if (t === 1) return 1;
+    return 1 + a * Math.pow(2, -10 * t) * Math.sin((t - s) * e);
+  };
+}
+
+function easeInBounce(t: number): number {
+  let b = 4;
+  let pow2 = 0;
+  do {
+    b -= 1;
+    pow2 = Math.pow(2, b);
+  } while (t < (pow2 - 1) / 11);
+  return 1 / Math.pow(4, 3 - b) - 7.5625 * Math.pow((pow2 * 3 - 2) / 22 - t, 2);
+}
+
+function easeOutBounce(t: number): number {
+  return 1 - easeInBounce(1 - t);
+}
+
+const EASE_OUT_BACK = easeOutBack(2.4);
+const EASE_OUT_ELASTIC = easeOutElastic(1.15, 0.45);
+const EASE_OUT_BOUNCE = easeOutBounce;
 
 /** Base path for the character's 2D accent art (emotion icon overlay only). */
 const ART_BASE = "./assets/character/processed";
@@ -152,8 +190,8 @@ const IDLE_SWAY_AMPLITUDE = 0.5; // radians (~29 degrees each way)
 const IDLE_SWAY_SPEED = (2 * Math.PI) / 4.5;
 
 /** Radius/speed of the continuous idle wandering path (position, not rotation). */
-const IDLE_WANDER_X = 0.55;
-const IDLE_WANDER_Z = 0.3;
+const IDLE_WANDER_X = 0.4;
+const IDLE_WANDER_Z = 0.2;
 const IDLE_WANDER_SPEED_X = (2 * Math.PI) / 8;
 const IDLE_WANDER_SPEED_Z = (2 * Math.PI) / 5.6; // different period than X -> an organic, non-repeating path
 
@@ -462,9 +500,9 @@ export class ThreeCharacterRenderer implements CharacterRenderer {
         // small rocking wobble alone read as boring.
         const settle = EASE_OUT_ELASTIC(1 - p);
         rotation.y = p * Math.PI * 3;
-        rotation.z = Math.sin(t * 11) * 0.26 * settle;
-        position.x = Math.sin(t * 11) * 0.34 * settle;
-        position.y = 0.2 * settle * Math.abs(Math.sin(t * 8.5));
+        rotation.z = Math.sin(t * 11) * 0.22 * settle;
+        position.x = Math.sin(t * 11) * 0.24 * settle;
+        position.y = 0.15 * settle * Math.abs(Math.sin(t * 8.5));
         break;
       }
       case "point": {
@@ -498,9 +536,9 @@ export class ThreeCharacterRenderer implements CharacterRenderer {
         // landing back near center. Real travel, not just a rise-and-settle
         // in place.
         const arc = Math.sin(p * Math.PI); // 0 -> 1 -> 0
-        position.y = 0.55 * arc;
-        position.x = 0.65 * Math.sin(p * Math.PI * 2);
-        position.z = 0.32 * arc;
+        position.y = 0.4 * arc;
+        position.x = 0.46 * Math.sin(p * Math.PI * 2);
+        position.z = 0.24 * arc;
         rotation.x = -0.18 * arc;
         rotation.y = p * Math.PI * 2.2;
         rotation.z = Math.sin(t * 8) * 0.2;
@@ -512,8 +550,8 @@ export class ThreeCharacterRenderer implements CharacterRenderer {
         // and landing with an anime.js outBounce settle instead of a plain
         // cosine wobble.
         const squat = p < 0.12 ? -0.1 * Math.sin((p / 0.12) * Math.PI) : 0;
-        position.x = 0.32 * Math.sin(p * Math.PI);
-        position.y = 0.58 * (4 * p * (1 - p)) + squat * 0.3;
+        position.x = 0.22 * Math.sin(p * Math.PI);
+        position.y = 0.42 * (4 * p * (1 - p)) + squat * 0.3;
         const bounce = 1 - 0.14 * (1 - EASE_OUT_BOUNCE(Math.min(p * 2, 1))) * Math.sin(p * Math.PI) + squat;
         if (emotion === "surprised") {
           // "!" reads as an excited puff-up mid-air -- no separate wings to
@@ -528,8 +566,8 @@ export class ThreeCharacterRenderer implements CharacterRenderer {
       }
       case "approach": {
         const ease = EASE_OUT_BACK(p);
-        position.z = 0.5 * ease;
-        scale.setScalar(1 + 0.14 * ease);
+        position.z = 0.4 * ease;
+        scale.setScalar(1 + 0.1 * ease);
         break;
       }
     }

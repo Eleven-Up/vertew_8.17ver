@@ -225,12 +225,19 @@ async def conversation_ws(websocket: WebSocket) -> None:
                     },
                     session_id=session_id,
                 )
-            # The customer just ordered something by voice: reveal the payment QR
-            # (same event the kiosk already reacts to for the "purchase intent"
-            # debug/analyze-transcript path) so they can scan it to review and pay.
-            if getattr(response, "order_items", ()) and session_id and customer_session:
+            # The kiosk has no touchscreen, so the payment QR only appears once the
+            # customer explicitly confirms by voice that they want to pay now (Req:
+            # confirm-then-pay) -- never just because items were recognized. A
+            # confirmation with nothing actually in the draft (e.g. a stray "yes")
+            # is a no-op rather than popping an empty-order QR.
+            if (
+                getattr(response, "confirm_payment", False)
+                and session_id
+                and customer_session
+                and data_store.get_draft_items(session_id)
+            ):
                 await manager.broadcast(
-                    customer_session.store_id, "show_qr", {"reason": "order_items"}, session_id=session_id
+                    customer_session.store_id, "show_qr", {"reason": "payment_confirmed"}, session_id=session_id
                 )
             await websocket.send_json(_response_payload(response))
     except WebSocketDisconnect:

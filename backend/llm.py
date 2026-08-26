@@ -145,6 +145,7 @@ def parse(raw: RawResponse) -> CharacterResponse:
     raw_matched = data.get("matched_qa_id")
     matched_qa_id = raw_matched if _is_non_empty_str(raw_matched) else None
     order_items = _parse_order_items(data.get("order_items"))
+    confirm_payment = data.get("confirm_payment") is True
 
     return CharacterResponse(
         text=text[:MAX_TEXT_LENGTH],
@@ -154,6 +155,7 @@ def parse(raw: RawResponse) -> CharacterResponse:
         action=action,
         matched_qa_id=matched_qa_id,
         order_items=order_items,
+        confirm_payment=confirm_payment,
     )
 
 

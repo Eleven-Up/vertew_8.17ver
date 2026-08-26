@@ -14,7 +14,7 @@ body { background: #000; color: #fff; font-family: Inter, "Arial Black", system-
 /* Centered via margin (not transform) so #character's own `transform` is free
  * for the per-emotion animations below without fighting a static centering
  * transform every keyframe would otherwise need to repeat. */
-#character { position: absolute; z-index: 2; left: 50%; top: 41%; width: min(56vw, 420px); aspect-ratio: 1; margin-left: calc(min(56vw, 420px) / -2); margin-top: calc(min(56vw, 420px) / -2); overflow: visible; filter: drop-shadow(0 0 25px rgba(78,229,246,.3)); }
+#character { position: absolute; z-index: 2; left: 50%; bottom: 12%; width: min(56vw, 420px); aspect-ratio: 1; margin-left: calc(min(56vw, 420px) / -2); overflow: visible; filter: drop-shadow(0 0 25px rgba(78,229,246,.3)); }
 /* Emotion/gesture motion (rotation, bob, spin, wiggle) is now driven entirely
  * by the three.js render loop in character.ts, on the 3D model itself --
  * there is no CSS pose-swap animation left to trigger from the expr-*/motion-*
@@ -36,6 +36,9 @@ body[data-state]:not([data-state="idle"]) .hero-copy { opacity: 0; pointer-event
 .qr-panel { position: absolute; z-index: 9; right: 16px; bottom: 16px; display: grid; justify-items: center; gap: 5px; width: 104px; padding: 8px; border: 2px solid var(--cyan); border-radius: 14px; color: var(--cyan); background: #fff; box-shadow: 0 0 28px rgba(79,229,242,.35); }.qr-panel img { width: 84px; height: 84px; }.qr-panel span { color: #061014; font-size: 9px; font-weight: 1000; letter-spacing: .06em; }
 .qr-overlay { position: absolute; z-index: 30; inset: 0; display: none; place-content: center; justify-items: center; background: rgba(0,0,0,.97); }.qr-overlay p { margin: 0 0 16px; color: var(--cyan); font-size: clamp(34px,6vw,72px); font-weight: 1000; letter-spacing: .06em; text-shadow: 0 0 24px #2ed9e8; }.qr-overlay img { width: min(54vh,54vw,500px); border: 14px solid #fff; border-radius: 18px; }.qr-overlay .qr-link { margin-top: 18px; max-width: min(80vw, 480px); color: #7defff; font-size: 13px; font-family: ui-monospace, monospace; text-align: center; word-break: break-all; text-decoration: underline; }
 .qr-overlay span { margin-top: 14px; color: #a7aeba; font-size: 18px; }.qr-overlay button { position: absolute; top: 22px; right: 28px; color: #fff; background: transparent; font-size: 42px; }.qr-expanded .qr-overlay { display: grid; }
+/* Overrides the generic large cyan `.qr-overlay p` heading style -- this is a
+ * small, low-key auto-close notice, not another headline. */
+.qr-overlay .qr-countdown { margin: 12px 0 0; color: #a7aeba; font-size: 15px; font-weight: 800; letter-spacing: normal; text-shadow: none; }
 .ready-overlay { position: absolute; z-index: 40; inset: 0; display: none; place-content: center; justify-items: center; text-align: center; background: radial-gradient(circle, #143529, #030805 58%, #000); }.ready-overlay p { margin: 0; color: #5ff0b8; font-size: 22px; font-weight: 1000; letter-spacing: .2em; }.ready-overlay strong { color: var(--orange); font-size: clamp(120px,26vw,300px); line-height: .9; text-shadow: 0 0 55px rgba(255,158,57,.55); }.ready-overlay h2 { max-width: 850px; margin: 25px 20px 0; font-size: clamp(28px,5vw,62px); line-height: 1.15; }.ready-spark { color: var(--cyan); font-size: 60px; animation: sparkle .8s ease-in-out infinite alternate; }.order-ready .ready-overlay { display: grid; }
 #debug-panel { position: absolute; z-index: 50; left: 18px; top: 70px; width: 250px; padding: 12px; border: 1px solid #343d49; border-radius: 14px; background: rgba(10,13,18,.94); opacity: .25; transition: opacity .2s; }#debug-panel:hover { opacity: 1; }.debug-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; color: #8e98a7; font-size: 9px; letter-spacing: .1em; }.debug-head button { padding: 5px 7px; }.debug-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }.debug-grid button,.debug-head button { border: 1px solid #374353; border-radius: 7px; color: #dbe3ec; background: #171d25; font-size: 9px; font-weight: 800; cursor: pointer; }.debug-grid button { min-height: 34px; padding: 5px; }body:not(.debug-enabled) #debug-panel { display: none; }
 .debug-transcript-form { display: flex; gap: 5px; margin-top: 5px; }.debug-transcript-form input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid #374353; border-radius: 7px; color: #dbe3ec; background: #171d25; font-size: 11px; }.debug-transcript-form input::placeholder { color: #5c6675; }.debug-transcript-form button { border: 1px solid #374353; border-radius: 7px; color: #dbe3ec; background: #1f2833; font-size: 10px; font-weight: 800; padding: 6px 10px; cursor: pointer; }
@@ -71,10 +74,9 @@ body[data-display="tablet"] #stage {
 }
 
 body[data-display="tablet"] #character {
-  top: 48%;
+  bottom: 10%;
   width: min(46vw, 430px);
   margin-left: calc(min(46vw, 430px) / -2);
-  margin-top: calc(min(46vw, 430px) / -2);
 }
 
 body[data-display="tablet"] .hero-copy {
@@ -160,10 +162,9 @@ body[data-display="tablet"] .ready-overlay h2 {
 
 @media (min-width: 701px) and (max-width: 900px), (max-height: 520px) {
   body[data-display="tablet"] #character {
-    top: 47%;
+    bottom: 9%;
     width: min(43vw, 340px);
     margin-left: calc(min(43vw, 340px) / -2);
-    margin-top: calc(min(43vw, 340px) / -2);
   }
 
   body[data-display="tablet"] .top-bar { inset: 10px 12px auto; }
@@ -218,5 +219,5 @@ body[data-display="tablet"] .ready-overlay h2 {
 }
 @keyframes effect-pop { 0%,100% { transform: scale(.88) translateY(4px); } 50% { transform: scale(1.04) translateY(-5px); } }
 @keyframes sparkle { to { transform: scale(1.3) rotate(20deg); opacity: .55; } }
-@media (max-width:700px) { #character { width: min(96vw, 760px); top: 45%; margin-left: calc(min(96vw, 760px) / -2); margin-top: calc(min(96vw, 760px) / -2); }#debug-panel { top: 58px; left: 8px; transform: scale(.8); transform-origin: top left; }.top-bar { inset: 14px; }.hero-copy { bottom: 160px; }.qr-panel { right: 14px; bottom: 14px; width: 105px; }.qr-panel img { width: 82px; height: 82px; }#order-board,#chat-log { display: none; } }
+@media (max-width:700px) { #character { width: min(96vw, 760px); bottom: 22%; margin-left: calc(min(96vw, 760px) / -2); }#debug-panel { top: 58px; left: 8px; transform: scale(.8); transform-origin: top left; }.top-bar { inset: 14px; }.hero-copy { bottom: 160px; }.qr-panel { right: 14px; bottom: 14px; width: 105px; }.qr-panel img { width: 82px; height: 82px; }#order-board,#chat-log { display: none; } }
 @media (prefers-reduced-motion:reduce) { .vertew-effect { animation: none !important; } }

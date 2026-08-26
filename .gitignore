@@ -65,3 +65,8 @@ Thumbs.db
 backend/.agents/
 backend/.claude/
 backend/skills-lock.json
+
+# Runtime state written by scripts/windows/start-vertew.ps1 (tracked PIDs / URL
+# of the current local run) -- machine-specific, regenerated every start.
+/vertew-run.json
+/vertew-url.txt

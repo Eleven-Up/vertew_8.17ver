@@ -23,6 +23,7 @@ the Kiosk_UI.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import tempfile
 from typing import Any, Protocol
@@ -171,6 +172,39 @@ class FasterWhisperEngine:
                 pass
 
 
+def _groq_confidence(segments: object, text: str) -> float:
+    """Estimate transcription/language confidence from a Groq ``verbose_json``
+    response.
+
+    Groq's Whisper endpoint (unlike faster-whisper's ``info.language_probability``)
+    exposes no direct language-detection confidence, only per-segment
+    ``no_speech_prob`` (is this segment silence?) and ``avg_logprob`` (how
+    confident is the model in the tokens it actually transcribed?). This
+    previously used ``1 - no_speech_prob`` alone, which only measures "is there
+    speech" -- a short or acoustically ambiguous utterance reliably has speech
+    (low no_speech_prob) while Whisper's *language* guess for it is unreliable,
+    so that score stayed near 1.0 and every such guess passed
+    ``LANGUAGE_CONFIDENCE_THRESHOLD``, snapping the session to whatever language
+    Whisper happened to guess (observed as a sudden, spurious switch to Korean).
+    Taking the minimum of both signals instead requires the clip to both
+    contain real speech AND be transcribed with the model's own confidence
+    before a language switch is trusted.
+    """
+    rows = [s for s in (segments or []) if isinstance(s, dict)]
+    if not rows:
+        return 1.0 if text else 0.0
+
+    no_speech = [float(s["no_speech_prob"]) for s in rows if s.get("no_speech_prob") is not None]
+    speech_confidence = 1.0 - (sum(no_speech) / len(no_speech)) if no_speech else 1.0
+
+    logprobs = [float(s["avg_logprob"]) for s in rows if s.get("avg_logprob") is not None]
+    # avg_logprob is a mean per-token log-probability (0 = certain, more
+    # negative = less certain); exp() maps it back onto a 0..1 scale.
+    transcription_confidence = math.exp(sum(logprobs) / len(logprobs)) if logprobs else 1.0
+
+    return max(0.0, min(1.0, speech_confidence, transcription_confidence))
+
+
 class GroqWhisperEngine:
     """Fast multilingual cloud transcription using Groq's Whisper endpoint."""
 
@@ -222,17 +256,8 @@ class GroqWhisperEngine:
             payload = response.json()
             text = str(payload.get("text") or "").strip()
             language = normalize_stt_language(payload.get("language"))
-            probabilities = [
-                1.0 - float(segment["no_speech_prob"])
-                for segment in payload.get("segments", [])
-                if isinstance(segment, dict) and segment.get("no_speech_prob") is not None
-            ]
-            confidence = (
-                sum(probabilities) / len(probabilities)
-                if probabilities
-                else (1.0 if text else 0.0)
-            )
-            return text, language, max(0.0, min(1.0, confidence))
+            confidence = _groq_confidence(payload.get("segments"), text)
+            return text, language, confidence
         except SttUnavailableError:
             raise
         except Exception as exc:

@@ -89,6 +89,19 @@ export class ForegroundVoiceGate {
     return foregroundVoiceThreshold(this.noiseFloor ?? 0);
   }
 
+  /**
+   * True while the *current* above-threshold streak has held for at least
+   * {@link FOREGROUND_HOLD_MS} -- unlike {@link detected}, which latches
+   * permanently once a foreground voice has ever been confirmed, this
+   * re-evaluates every call. Used to require a sustained voice (not a single
+   * loud market-noise blip) to keep blocking the end-of-speech silence timer,
+   * so a brief clatter right after the customer stops talking doesn't restart
+   * the whole wait and drag capture out toward the max-capture cap.
+   */
+  sustainedNow(now: number): boolean {
+    return this.foregroundSince !== null && now - this.foregroundSince >= FOREGROUND_HOLD_MS;
+  }
+
   observe(rms: number, now: number): boolean {
     const level = Number.isFinite(rms) ? Math.max(0, rms) : 0;
     if (now - this.startedAt < FOREGROUND_CALIBRATION_MS) {
@@ -249,6 +262,7 @@ export class WebSpeechSttProvider implements SttProvider {
   private recognition: SpeechRecognitionLike | null = null;
   private callback: ((r: SttResult) => void) | null = null;
   private partialCallback: ((text: string) => void) | null = null;
+  private transcribingCallback: (() => void) | null = null;
 
   private noSpeechTimer: ReturnType<typeof setTimeout> | null = null;
   private maxCaptureTimer: ReturnType<typeof setTimeout> | null = null;
@@ -278,6 +292,10 @@ export class WebSpeechSttProvider implements SttProvider {
 
   onPartial(cb: (text: string) => void): void {
     this.partialCallback = cb;
+  }
+
+  onTranscribing(cb: () => void): void {
+    this.transcribingCallback = cb;
   }
 
   start(): void {
@@ -321,6 +339,7 @@ export class WebSpeechSttProvider implements SttProvider {
 
     recognition.onspeechend = () => {
       // End-of-speech detected; allow a bounded window for the final transcript.
+      this.transcribingCallback?.();
       this.armResultTimer();
     };
 
@@ -573,6 +592,7 @@ interface WindowWithWebkitAudioContext {
 
 export class LocalSttProvider implements SttProvider {
   private callback: ((r: SttResult) => void) | null = null;
+  private transcribingCallback: (() => void) | null = null;
 
   private stream: MediaStream | null = null;
   private recorder: MediaRecorder | null = null;
@@ -604,6 +624,10 @@ export class LocalSttProvider implements SttProvider {
 
   /** No interim transcripts in batch mode; kept as a no-op to satisfy SttProvider. */
   onPartial(_cb: (text: string) => void): void {}
+
+  onTranscribing(cb: () => void): void {
+    this.transcribingCallback = cb;
+  }
 
   start(): void {
     this.settled = false;
@@ -678,8 +702,14 @@ export class LocalSttProvider implements SttProvider {
       }
       const rms = Math.sqrt(sumSquares / data.length);
 
-      const aboveForegroundGate = gate.observe(rms, performance.now());
-      if (gate.detected && aboveForegroundGate) {
+      const now = performance.now();
+      gate.observe(rms, now);
+      // A single loud frame (a plate clatter, a passer-by's word) shouldn't
+      // reset the silence countdown -- only a *sustained* above-threshold
+      // streak counts as someone still actively talking. Otherwise, in a
+      // busy market, brief noise between customer phrases would keep
+      // re-arming the timer and drag capture out toward MAX_CAPTURE_MS.
+      if (gate.detected && gate.sustainedNow(now)) {
         this.speechStarted = true;
         this.clearTimer("noSpeech");
         this.clearTimer("silence");
@@ -717,6 +747,10 @@ export class LocalSttProvider implements SttProvider {
       this.emit({ kind: "no-match" });
       return;
     }
+    // Capture has ended and the clip is now being sent off for transcription
+    // -- the UI's cue to move from "listening" to a distinct "understanding"
+    // state rather than appearing to hang until this resolves.
+    this.transcribingCallback?.();
     try {
       const form = new FormData();
       form.append("audio", blob, "clip.webm");

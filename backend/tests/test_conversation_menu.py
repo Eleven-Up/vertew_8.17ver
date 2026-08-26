@@ -135,4 +135,22 @@ def test_local_response_spice_question_korean_from_catalog():
 def test_local_response_backward_compatible_without_catalog():
     # Existing two-argument behavior is unchanged (see test_local_response.py).
     assert "RM 8" in _local_response("나시고랭 가격이 얼마예요?", "ko").text
-    assert "QR" in _local_response("I want to order", "en").text
+    # No touchscreen on the kiosk: ordering asks for a pay confirmation rather
+    # than pointing at a QR code immediately.
+    assert "pay" in _local_response("I want to order", "en").text.lower()
+
+
+def test_local_response_matches_unspaced_korean_dish_names():
+    # The catalog stores "나시 고렝"/"나시 르막" with a space, but natural speech
+    # and STT output commonly fuse the loanword without one -- e.g. "나시고렝"
+    # (the more common spelling) and "나시르막". Matching must not be sensitive
+    # to that spacing difference.
+    store = _seeded_store()
+    try:
+        products = store.list_products("demo")
+        assert "RM 8" in _local_response("나시고렝 얼마예요?", "ko", products).text
+        assert "RM 7" in _local_response("나시르막 얼마예요?", "ko", products).text
+        ingredient_answer = _local_response("나시고렝에 뭐 들어가요?", "ko", products)
+        assert "나시 고렝" in ingredient_answer.text
+    finally:
+        store.close()

@@ -236,6 +236,7 @@ def _resolve_draft(session_id: str, store: DataStore) -> dict:
             "note": entry.get("note", ""),
             "name": product.name,
             "unit_price_minor": product.price_minor,
+            "image": product.image,
         })
         total += product.price_minor * quantity
     return {"session_id": session_id, "items": resolved, "total_minor": total, "currency": "MYR"}

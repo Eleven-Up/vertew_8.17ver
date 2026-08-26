@@ -44,6 +44,7 @@ export interface DraftItem {
   note: string;
   name: Record<Language, string>;
   unit_price_minor: number;
+  image: string;
 }
 
 export interface Draft {

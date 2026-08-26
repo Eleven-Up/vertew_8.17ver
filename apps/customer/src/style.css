@@ -30,6 +30,7 @@ button.secondary { color: #75efff; background: #10242b; border: 1px solid #26717
 .cart-item { padding: 15px 0; border-bottom: 1px solid #242836; }
 .cart-row { display: grid; grid-template-columns: 58px 1fr auto auto; align-items: center; gap: 12px; }
 .cart-dish { font-size: 42px; }
+.cart-dish-image { width: 48px; height: 48px; border-radius: 12px; object-fit: cover; }
 .cart-row small { display: block; color: #929aac; margin-top: 5px; }
 .cart-note { width: 100%; margin-top: 10px; padding: 9px 12px; font-size: 13px; color: #fff; background: #12141d; border: 1px solid #2c3142; border-radius: 10px; }
 .cart-note::placeholder { color: #6b7286; }

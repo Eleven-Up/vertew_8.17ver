@@ -51,6 +51,9 @@ export function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(true);
   const [readyOrder, setReadyOrder] = useState<Order | null>(null);
+  // Product ids whose photo failed to load, so the cart falls back to the
+  // dish emoji instead of a broken-image icon.
+  const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
   const dismissedReady = useRef(new Set<string>());
   // Special-request text the customer is actively typing, keyed by product_id
   // -- kept separate from `draft` so the 2s background poll (which may bring
@@ -249,7 +252,16 @@ export function App() {
             {draft.items.map((item) => (
               <div className="cart-item" key={item.product_id}>
                 <div className="cart-row">
-                  <span className="cart-dish">{dishEmoji[item.product_id] ?? "🍽️"}</span>
+                  {item.image && !brokenImages.has(item.product_id) ? (
+                    <img
+                      className="cart-dish-image"
+                      src={item.image}
+                      alt={item.name[language] ?? item.name.en}
+                      onError={() => setBrokenImages((prev) => new Set(prev).add(item.product_id))}
+                    />
+                  ) : (
+                    <span className="cart-dish">{dishEmoji[item.product_id] ?? "🍽️"}</span>
+                  )}
                   <div><strong>{item.name[language] ?? item.name.en}</strong><small>{money(item.unit_price_minor)} {t.each}</small></div>
                   <div className="stepper">
                     <button onClick={() => void changeQuantity(item.product_id, -1)}>−</button>

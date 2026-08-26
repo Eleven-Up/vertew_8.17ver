@@ -280,6 +280,43 @@ body {
 }
 
 /* ===========================================================================
+ * Status pill -- "understanding" / "thinking" / "ready" (Kiosk_UI states
+ * between listening and speaking, see kiosk.ts). Shares #listening-indicator's
+ * slot/style so the handoff from "Listening…" reads as one continuous pill
+ * that just changes text as the turn progresses, rather than a new widget
+ * popping in; hidden for every other state via the data-state selectors below.
+ * ======================================================================== */
+#status-pill {
+  position: absolute;
+  bottom: 8%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 22px;
+  background: rgba(103, 239, 255, 0.14);
+  border: 2px solid var(--cyan, #67efff);
+  border-radius: 999px;
+  font-size: 18px;
+  color: var(--cyan, #67efff);
+}
+#status-pill::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 1s ease-in-out infinite;
+}
+body[data-state="understanding"] #status-pill,
+body[data-state="thinking"] #status-pill,
+body[data-state="ready"] #status-pill { display: flex; }
+body[data-state="understanding"] #status-pill::after { content: "Understanding…"; }
+body[data-state="thinking"] #status-pill::after { content: "Thinking…"; }
+body[data-state="ready"] #status-pill::after { content: "Ready to answer!"; }
+
+/* ===========================================================================
  * Error banner
  * ======================================================================== */
 #error-banner {

@@ -1,7 +1,12 @@
 // Shared browser-side types for the Vertew Kiosk_UI.
 // Scaffolding only. Concrete logic is implemented in later tasks (10-13).
 
-export type UIState = "idle" | "listening" | "processing" | "speaking" | "error";
+// "understanding" (mic closed, converting the recorded speech to text) and
+// "thinking" (transcript sent to the server, waiting for its reply) split what
+// used to be a single opaque "processing" state so the customer sees which of
+// the two is happening; "ready" is the brief beat once the reply has arrived
+// but before the character actually starts talking.
+export type UIState = "idle" | "listening" | "understanding" | "thinking" | "ready" | "speaking" | "error";
 
 // ---------------------------------------------------------------------------
 // Allowed Emotion/Gesture value sets — the browser-side mirror of the server's
@@ -43,6 +48,12 @@ export interface SttProvider {
   // Optional: registers a callback for live interim transcripts emitted while the
   // user is still speaking, so the UI can show speech-to-text in real time.
   onPartial?(cb: (text: string) => void): void;
+  // Optional: registers a callback fired once capture has ended and the
+  // provider is turning the recorded audio into text (before the transcript
+  // is known) -- e.g. while LocalSttProvider's POST to /api/stt/transcribe is
+  // in flight -- so the UI can show an "understanding" state distinct from
+  // "listening" instead of appearing to freeze once the mic closes.
+  onTranscribing?(cb: () => void): void;
   // Switches the recognized/spoken language (e.g. "ko-KR") for the next capture.
   setLanguage(lang: string): void;
 }

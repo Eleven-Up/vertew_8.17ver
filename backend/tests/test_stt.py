@@ -39,6 +39,29 @@ def test_groq_whisper_posts_audio_and_returns_metadata() -> None:
     assert confidence == pytest.approx(0.9)
 
 
+def test_groq_whisper_confidence_reflects_transcription_uncertainty_too() -> None:
+    # Regression: a short/ambiguous clip reliably has speech (low
+    # no_speech_prob) even when Whisper's own transcription of it is shaky
+    # (very negative avg_logprob) -- confidence must reflect the latter too,
+    # not just "there is speech", or a sudden wrong language guess (e.g. a
+    # spurious switch to Korean) would always pass the confidence gate.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "text": "uh",
+                "language": "ko",
+                "segments": [{"no_speech_prob": 0.05, "avg_logprob": -1.6}],
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    engine = stt.GroqWhisperEngine(api_key="test-key", http_client=client)
+
+    _, _, confidence = engine.transcribe(b"sample-audio")
+    assert confidence < 0.3
+
+
 def test_groq_whisper_requires_api_key() -> None:
     engine = stt.GroqWhisperEngine(api_key="")
     with pytest.raises(stt.SttUnavailableError, match="GROQ_API_KEY"):

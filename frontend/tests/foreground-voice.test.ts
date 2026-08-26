@@ -52,6 +52,36 @@ describe("market foreground voice gate", () => {
     expect(gate.detected).toBe(false);
   });
 
+  it("does not stay sustained through a single loud market-noise blip", () => {
+    // A customer has already been talking (gate.detected latched true), then goes
+    // quiet, then one loud frame (a plate clatter) fires. sustainedNow must stay
+    // false until that streak itself has held for FOREGROUND_HOLD_MS -- otherwise
+    // a single frame would look identical to someone still actively talking and
+    // block the end-of-speech silence timer from ever starting.
+    const gate = calibratedGate();
+    gate.observe(0.05, 500);
+    gate.observe(0.05, 500 + FOREGROUND_HOLD_MS);
+    expect(gate.detected).toBe(true);
+
+    gate.observe(0.006, 700); // customer goes quiet
+    expect(gate.sustainedNow(700)).toBe(false);
+
+    gate.observe(0.12, 900); // single loud blip
+    expect(gate.sustainedNow(900)).toBe(false);
+    expect(gate.sustainedNow(900 + FOREGROUND_HOLD_MS - 1)).toBe(false);
+  });
+
+  it("does treat a genuinely sustained loud sound as still-active", () => {
+    const gate = calibratedGate();
+    gate.observe(0.05, 500);
+    gate.observe(0.05, 500 + FOREGROUND_HOLD_MS);
+
+    gate.observe(0.006, 700);
+    gate.observe(0.12, 900);
+    gate.observe(0.12, 900 + FOREGROUND_HOLD_MS);
+    expect(gate.sustainedNow(900 + FOREGROUND_HOLD_MS)).toBe(true);
+  });
+
   it("uses the quiet calibration percentile instead of learning intermittent clatter", () => {
     const gate = new ForegroundVoiceGate(0);
     for (const [level, now] of [[0.006, 0], [0.007, 100], [0.1, 200], [0.006, 300], [0.08, 499]] as const) {

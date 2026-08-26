@@ -26,6 +26,14 @@ PURCHASE_PHRASES = {
     "en": ("i want to buy", "i'll take", "how can i order", "place an order", "buy one"),
     "ms": ("saya mahu beli", "nak beli", "cara pesan", "mahu pesan", "beli satu"),
 }
+# Distinct from PURCHASE_PHRASES ("I want to order X") -- this is the explicit
+# "yes, pay now" confirmation that reveals the payment QR on a touchless kiosk
+# (see main.handle_websocket / ai_api.analyze).
+CONFIRM_PAYMENT_PHRASES = {
+    "ko": ("결제할게", "결제해주세요", "결제해줘", "계산할게", "계산해주세요", "네 결제", "지불할게"),
+    "en": ("i'll pay", "let's pay", "pay now", "yes, pay", "ready to pay", "i want to pay"),
+    "ms": ("saya nak bayar", "nak bayar sekarang", "boleh bayar", "ya, bayar"),
+}
 
 
 @dataclass(frozen=True)
@@ -39,9 +47,14 @@ class TranscriptAnalysis:
 def analyze_transcript(text: str, current_language: str = "en") -> TranscriptAnalysis:
     normalized = _normalize(text)
     language, confidence = detect_language(normalized, current_language)
+    confirm_payment_score = _phrase_score(normalized, CONFIRM_PAYMENT_PHRASES[language])
     purchase_score = _phrase_score(normalized, PURCHASE_PHRASES[language])
     interest_score = _phrase_score(normalized, INTEREST_PHRASES[language])
-    if purchase_score >= 0.72:
+    # Checked first: "I'll pay now" must win over the (looser) purchase-phrase
+    # match rather than being classified as just another order request.
+    if confirm_payment_score >= 0.72:
+        intent, intent_confidence = "confirm_payment", confirm_payment_score
+    elif purchase_score >= 0.72:
         intent, intent_confidence = "purchase", purchase_score
     elif interest_score >= 0.7:
         intent, intent_confidence = "interest", interest_score
@@ -50,6 +63,26 @@ def analyze_transcript(text: str, current_language: str = "en") -> TranscriptAna
     else:
         intent, intent_confidence = "other", 0.4
     return TranscriptAnalysis(language, confidence, intent, round(intent_confidence, 3))
+
+
+def is_plausible_for_text(language: str, text: str) -> bool:
+    """Cheap sanity check: is ``language`` consistent with what's actually in
+    ``text``?
+
+    Guards against trusting an upstream speech-to-text engine's per-clip
+    language guess when the transcript itself contradicts it -- e.g. Whisper
+    (via Groq) can report "ko" with a deceptively high confidence for a
+    short/ambiguous clip whose actual transcribed text has no Hangul at all
+    (see stt.GroqWhisperEngine._groq_confidence and the caller in ai_api.py),
+    which otherwise reads as the session suddenly, spuriously switching to
+    Korean. Latin-script languages (en/ms) aren't reliably distinguishable by
+    charset alone, so this only rules out the impossible case of Hangul text
+    claimed as non-Korean or non-Hangul text claimed as Korean.
+    """
+    has_hangul = bool(re.search(r"[가-힣]", text))
+    if language == "ko":
+        return has_hangul
+    return not has_hangul
 
 
 def detect_language(text: str, current_language: str = "en") -> tuple[str, float]:

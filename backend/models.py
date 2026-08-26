@@ -61,6 +61,12 @@ class CharacterResponse:
     # Items the customer ordered in this turn (empty when none were), merged into
     # the session's draft order rather than sent to the Kiosk_UI wire payload.
     order_items: tuple[OrderItemDelta, ...] = ()
+    # True only when the customer's message just now explicitly confirmed they
+    # want to pay/checkout (not merely that they ordered items) -- the kiosk has
+    # no touchscreen, so the payment QR only appears on this explicit voice
+    # confirmation, never automatically the moment items are recognized. See
+    # conversation.handle_transcript and prompt_builder.build.
+    confirm_payment: bool = False
 
 
 @dataclass

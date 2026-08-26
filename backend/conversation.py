@@ -276,11 +276,22 @@ def _looks_like_question(transcript: str) -> bool:
     return any(marker in text for marker in _QUESTION_WORDS)
 
 
+def _squash(text: str) -> str:
+    """Remove whitespace for lenient name matching: a transliterated loanword's
+    spacing (e.g. "나시 고렝" vs "나시고렝", the more common no-space spelling) is
+    inconsistent between the catalog and natural speech/STT output, and dropping
+    spaces from both sides before comparing never turns a real match into a
+    false one -- it only lets an already-correct substring match survive a
+    spacing difference."""
+    return "".join(text.split())
+
+
 def _match_product(text: str, products: list[Product]) -> Product | None:
     """Return the first product whose id or any localized name appears in ``text``."""
+    squashed_text = _squash(text)
     for product in products:
         candidates = [product.id, *product.name.values()]
-        if any(candidate and candidate.lower() in text for candidate in candidates):
+        if any(candidate and _squash(candidate.lower()) in squashed_text for candidate in candidates):
             return product
     return None
 
@@ -367,20 +378,30 @@ def _local_response(
               "nasi goreng": 8, "나시 고렝": 8, "나시고랭": 8,
               "beef noodle soup": 8.5, "우육면": 8.5,
               "hainanese chicken rice": 7.5, "chicken rice": 7.5, "하이난": 7.5, "치킨 라이스": 7.5}
-    product = next(((name, price) for name, price in prices.items() if name in text), None)
+    squashed_text = _squash(text)
+    product = next(((name, price) for name, price in prices.items() if _squash(name) in squashed_text), None)
     asks_price = any(word in text for word in ("price", "how much", "얼마", "가격", "berapa", "harga"))
     wants_order = any(word in text for word in ("order", "buy", "take one", "주문", "살게", "주세요", "pesan", "beli"))
+    # The kiosk has no touchscreen, so the QR code only appears on this explicit
+    # "yes, pay now" confirmation -- distinct from wants_order ("I'd like to
+    # order X"), which should ask for that confirmation rather than jump
+    # straight to payment. Mirrors intent.CONFIRM_PAYMENT_PHRASES.
+    confirms_payment = any(word in text for word in ("pay", "결제", "지불", "계산", "bayar"))
     if product and asks_price:
         price = product[1]
-        copies = {"en": f"It is RM {price:g}. You can scan the QR code to order!",
-                  "ko": f"가격은 RM {price:g}입니다. QR 코드를 스캔해서 주문해 주세요!",
-                  "ms": f"Harganya RM {price:g}. Imbas kod QR untuk membuat pesanan!"}
+        copies = {"en": f"It is RM {price:g}. Just say you'd like to order it!",
+                  "ko": f"가격은 RM {price:g}입니다. 주문하시려면 말씀해 주세요!",
+                  "ms": f"Harganya RM {price:g}. Beritahu saya jika anda mahu memesannya!"}
+    elif confirms_payment:
+        copies = {"en": "Great, let's get that paid for -- one moment!",
+                  "ko": "좋아요, 결제 도와드릴게요, 잠시만요!",
+                  "ms": "Baik, mari kita selesaikan pembayaran -- sekejap!"}
     elif wants_order:
-        copies = {"en": "Great! Please scan the QR code to place your order.",
-                  "ko": "좋아요! QR 코드를 스캔해서 주문해 주세요.",
-                  "ms": "Baik! Sila imbas kod QR untuk membuat pesanan."}
+        copies = {"en": "Got it! Would you like to pay for that now?",
+                  "ko": "알겠어요! 지금 결제하시겠어요?",
+                  "ms": "Baik! Anda mahu bayar sekarang?"}
     else:
         copies = {"en": "We have nasi lemak, tteokbokki, nasi goreng, beef noodle soup, and Hainanese chicken rice. What would you like?",
                   "ko": "나시 르막, 떡볶이, 나시 고렝, 우육면, 하이난 치킨 라이스가 있어요. 어떤 메뉴를 원하세요?",
                   "ms": "Kami ada nasi lemak, tteokbokki, nasi goreng, mi sup daging dan nasi ayam Hainan. Anda mahu yang mana?"}
-    return CharacterResponse(copies[lang], "happy", "wave" if wants_order else "nod", True)
+    return CharacterResponse(copies[lang], "happy", "wave" if (wants_order or confirms_payment) else "nod", True)

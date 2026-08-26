@@ -349,7 +349,32 @@ async function renderQr(value: string): Promise<void> {
   if (link) { link.href = value; link.textContent = value; }
 }
 
-function showQr(show: boolean): void { document.body.classList.toggle("qr-expanded", show); }
+/** How long the QR overlay stays open before auto-closing -- long enough to
+ * scan, short enough that the customer isn't stuck looking at it if they have
+ * a follow-up question once it's gone (Req: touchless auto-close). */
+const QR_AUTO_CLOSE_MS = 5000;
+let qrAutoCloseTimer: ReturnType<typeof setTimeout> | null = null;
+let qrCountdownTimer: ReturnType<typeof setInterval> | null = null;
+
+function clearQrTimers(): void {
+  if (qrAutoCloseTimer !== null) { clearTimeout(qrAutoCloseTimer); qrAutoCloseTimer = null; }
+  if (qrCountdownTimer !== null) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
+}
+
+function showQr(show: boolean): void {
+  document.body.classList.toggle("qr-expanded", show);
+  clearQrTimers();
+  if (!show) return;
+
+  const countdown = document.getElementById("qr-countdown");
+  let remainingSeconds = Math.ceil(QR_AUTO_CLOSE_MS / 1000);
+  if (countdown) countdown.textContent = `Closing in ${remainingSeconds}s`;
+  qrCountdownTimer = setInterval(() => {
+    remainingSeconds -= 1;
+    if (countdown) countdown.textContent = `Closing in ${Math.max(remainingSeconds, 0)}s`;
+  }, 1000);
+  qrAutoCloseTimer = setTimeout(() => showQr(false), QR_AUTO_CLOSE_MS);
+}
 function speechLocale(language: string): string {
   return language === "ko" ? "ko-KR" : language === "ms" ? "ms-MY" : "en-US";
 }
