@@ -152,3 +152,28 @@ On the vendor's phone (same Wi-Fi as the Pi), open
 and "call the owner" pings from the conversation AI. The customer-facing order
 page is what the kiosk's on-screen QR code already links to -- nothing extra
 to open there.
+
+## Sharing a public link (`start-vertew.sh` / `stop-vertew.sh`)
+
+For showing the demo to someone not on the same network -- not for the
+always-on kiosk display itself, which is `kiosk.sh` autostarted against the
+local server (see above):
+
+```bash
+./scripts/start-vertew.sh   # or: bash scripts/start-vertew.sh
+```
+
+Starts the backend, opens a [Cloudflare quick
+tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/)
+(no account needed; requires `cloudflared` on `PATH` -- see its install docs
+if missing), prints both the local and public URLs, and opens the public one
+in a normal (non-fullscreen) Chromium window. `./scripts/stop-vertew.sh` shuts
+both back down; safe to run even if nothing is running. Re-running
+`start-vertew.sh` is also safe -- it stops whatever it last started first.
+
+The printed public URL is also saved to `vertew-url.txt` (repo root) if you
+need it again without re-reading the terminal. It's a new random
+`https://*.trycloudflare.com` address each time (not a fixed domain), and
+**anyone with the link can reach your Pi's server for as long as it's
+running** -- only share it when you mean to, and run `stop-vertew.sh` when
+you're done.
