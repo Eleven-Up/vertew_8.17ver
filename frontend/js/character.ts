@@ -28,6 +28,7 @@
 
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { eases } from "animejs";
 import {
   DEFAULT_EMOTION,
   DEFAULT_GESTURE,
@@ -36,6 +37,19 @@ import {
   type Emotion,
   type Gesture,
 } from "./types.js";
+
+/**
+ * anime.js easing curves used to shape progress (`p`/`t` in [0,1]) for the
+ * punchier, more overshoot-y gesture motion below -- swapped in for the
+ * plain `1 - Math.cos(...)` ease-outs the hand-rolled motion used to use, so
+ * a lean/tilt/spin snaps past its rest point and springs back rather than
+ * gliding straight in. These are pure `(t) => number` functions (no DOM/CSS
+ * involved), so they drop directly into the per-frame position/rotation math
+ * below without needing an anime.js timeline or target.
+ */
+const EASE_OUT_BACK = eases.outBack(2.4);
+const EASE_OUT_ELASTIC = eases.outElastic(1.15, 0.45);
+const EASE_OUT_BOUNCE = eases.outBounce;
 
 /** Base path for the character's 2D accent art (emotion icon overlay only). */
 const ART_BASE = "./assets/character/processed";
@@ -134,22 +148,22 @@ const CHARACTER_BASE_YAW = 0.8;
  * {@link IDLE_FLOURISHES}) -- including a full look-around spin -- so it
  * reads as an active, roaming character rather than a static display piece.
  */
-const IDLE_SWAY_AMPLITUDE = 0.3; // radians (~17 degrees each way)
-const IDLE_SWAY_SPEED = (2 * Math.PI) / 6;
+const IDLE_SWAY_AMPLITUDE = 0.5; // radians (~29 degrees each way)
+const IDLE_SWAY_SPEED = (2 * Math.PI) / 4.5;
 
 /** Radius/speed of the continuous idle wandering path (position, not rotation). */
-const IDLE_WANDER_X = 0.32;
-const IDLE_WANDER_Z = 0.16;
-const IDLE_WANDER_SPEED_X = (2 * Math.PI) / 11;
-const IDLE_WANDER_SPEED_Z = (2 * Math.PI) / 7.3; // different period than X -> an organic, non-repeating path
+const IDLE_WANDER_X = 0.55;
+const IDLE_WANDER_Z = 0.3;
+const IDLE_WANDER_SPEED_X = (2 * Math.PI) / 8;
+const IDLE_WANDER_SPEED_Z = (2 * Math.PI) / 5.6; // different period than X -> an organic, non-repeating path
 
 /** Vertical bob amplitude/speed for the idle "breathing" motion. */
-const IDLE_BOB_AMPLITUDE = 0.06;
-const IDLE_BOB_SPEED = 1.1;
+const IDLE_BOB_AMPLITUDE = 0.09;
+const IDLE_BOB_SPEED = 1.4;
 
 /** How often an idle flourish plays, and how long each one lasts. */
-const IDLE_FLOURISH_PERIOD_S = 5;
-const IDLE_FLOURISH_DURATION_S = 1.7;
+const IDLE_FLOURISH_PERIOD_S = 4;
+const IDLE_FLOURISH_DURATION_S = 1.5;
 
 /**
  * A pool of short, distinctive idle flourishes cycled through over time (by
@@ -160,15 +174,18 @@ const IDLE_FLOURISH_DURATION_S = 1.7;
  * base sway/bob/wander.
  */
 const IDLE_FLOURISHES: ((p: number) => { rx: number; ry: number; rz: number; y: number; scale: number })[] = [
-  // Curious head-tilt.
-  (p) => ({ rx: 0, ry: 0, rz: Math.sin(p * Math.PI) * 0.22, y: 0, scale: 1 }),
+  // Curious head-tilt -- ramps in and back out through anime.js's outElastic
+  // curve (mirrored around the midpoint) instead of a plain sine glide, so it
+  // springs/wobbles into the tilt rather than gliding smoothly.
+  (p) => ({ rx: 0, ry: 0, rz: EASE_OUT_ELASTIC(p < 0.5 ? p * 2 : (1 - p) * 2) * 0.34, y: 0, scale: 1 }),
   // A little perked-up hop.
-  (p) => ({ rx: -0.06 * Math.sin(p * Math.PI), ry: 0, rz: 0, y: 0.1 * Math.sin(p * Math.PI), scale: 1 + 0.04 * Math.sin(p * Math.PI) }),
-  // A full look-around spin -- the clearest "this is real 3D" beat, and now
-  // safe to use freely since the current model reads well from every angle.
-  (p) => ({ rx: 0, ry: p * Math.PI * 2, rz: 0, y: 0.05 * Math.sin(p * Math.PI), scale: 1 }),
+  (p) => ({ rx: -0.1 * Math.sin(p * Math.PI), ry: 0, rz: 0, y: 0.18 * Math.sin(p * Math.PI), scale: 1 + 0.07 * Math.sin(p * Math.PI) }),
+  // A full look-around spin (now 1.5 turns for a wider rotation radius) --
+  // the clearest "this is real 3D" beat, and now safe to use freely since
+  // the current model reads well from every angle.
+  (p) => ({ rx: 0, ry: p * Math.PI * 3, rz: 0, y: 0.08 * Math.sin(p * Math.PI), scale: 1 }),
   // A quick alert perk (ears-up read on a bird with no ears: a brief upward stretch).
-  (p) => ({ rx: 0.05 * Math.sin(p * Math.PI), ry: 0, rz: 0, y: 0.05 * Math.sin(p * Math.PI), scale: 1 + 0.05 * Math.sin(p * Math.PI) }),
+  (p) => ({ rx: 0.08 * Math.sin(p * Math.PI), ry: 0, rz: 0, y: 0.08 * Math.sin(p * Math.PI), scale: 1 + 0.08 * Math.sin(p * Math.PI) }),
 ];
 
 type MotionState = { emotion: Emotion; gesture: Gesture; changedAt: number };
@@ -438,64 +455,71 @@ export class ThreeCharacterRenderer implements CharacterRenderer {
 
     switch (gesture) {
       case "wave": {
-        // An energetic little dance: a full spin plus a side-to-side shimmy
-        // and bouncing hops, decaying out at the end. This is the "look, real
-        // 3D!" showcase move -- a small rocking wobble alone read as boring.
-        const settle = 1 - p;
-        rotation.y = p * Math.PI * 2;
-        rotation.z = Math.sin(t * 9) * 0.18 * settle;
-        position.x = Math.sin(t * 9) * 0.22 * settle;
-        position.y = 0.12 * settle * Math.abs(Math.sin(t * 7));
+        // An energetic little dance: a full-and-a-half spin plus a wide
+        // side-to-side shimmy and bouncing hops, decaying out at the end via
+        // anime.js's outElastic so the settle wobbles rather than just
+        // linearly decays. This is the "look, real 3D!" showcase move -- a
+        // small rocking wobble alone read as boring.
+        const settle = EASE_OUT_ELASTIC(1 - p);
+        rotation.y = p * Math.PI * 3;
+        rotation.z = Math.sin(t * 11) * 0.26 * settle;
+        position.x = Math.sin(t * 11) * 0.34 * settle;
+        position.y = 0.2 * settle * Math.abs(Math.sin(t * 8.5));
         break;
       }
       case "point": {
-        // A modest lean toward what's being pointed at, not a big turn.
-        const ease = 1 - Math.cos((p * Math.PI) / 2);
-        rotation.y = 0.32 * ease;
-        rotation.x = 0.1 * ease;
-        position.z = 0.08 * ease;
+        // A lean toward what's being pointed at, snapped in with anime.js's
+        // outBack for a livelier little overshoot instead of a plain ease.
+        const ease = EASE_OUT_BACK(p);
+        rotation.y = 0.5 * ease;
+        rotation.x = 0.16 * ease;
+        position.z = 0.14 * ease;
         break;
       }
       case "nod": {
         const settle = 1 - p;
-        rotation.x = Math.sin(t * 10) * 0.2 * settle;
+        rotation.x = Math.sin(t * 13) * 0.32 * settle;
         break;
       }
       case "think": {
-        // A curious head-cock: eases into a held tilt (the "?" pose) rather
-        // than a quick wobble, with a small ongoing sway so it doesn't freeze.
-        const ease = 1 - Math.cos((Math.min(p, 0.4) / 0.4) * (Math.PI / 2));
-        rotation.z = -0.32 * ease + 0.03 * Math.sin(t * 1.6);
-        rotation.x = 0.06 * ease;
-        rotation.y = 0.1 * Math.sin(t * 1.1);
+        // A curious head-cock: springs into a held tilt (the "?" pose) via
+        // anime.js's outElastic rather than a quick wobble, with a small
+        // ongoing sway so it doesn't freeze.
+        const ease = EASE_OUT_ELASTIC(Math.min(p, 0.4) / 0.4);
+        rotation.z = -0.46 * ease + 0.05 * Math.sin(t * 1.9);
+        rotation.x = 0.1 * ease;
+        rotation.y = 0.16 * Math.sin(t * 1.4);
         position.y = IDLE_BOB_AMPLITUDE * Math.sin(totalElapsed * IDLE_BOB_SPEED * 0.6);
         break;
       }
       case "fly": {
-        // A sweeping loop across the frame -- lift, swing out to one side and
-        // back, bank, and turn most of the way around while airborne, landing
-        // back near center. Real travel, not just a rise-and-settle in place.
+        // A wide sweeping loop across the frame -- lift, swing out to one
+        // side and back, bank, and turn a full 2+ rotations while airborne,
+        // landing back near center. Real travel, not just a rise-and-settle
+        // in place.
         const arc = Math.sin(p * Math.PI); // 0 -> 1 -> 0
-        position.y = 0.35 * arc;
-        position.x = 0.42 * Math.sin(p * Math.PI * 2);
-        position.z = 0.2 * arc;
-        rotation.x = -0.12 * arc;
-        rotation.y = p * Math.PI * 1.5;
-        rotation.z = Math.sin(t * 6) * 0.14;
+        position.y = 0.55 * arc;
+        position.x = 0.65 * Math.sin(p * Math.PI * 2);
+        position.z = 0.32 * arc;
+        rotation.x = -0.18 * arc;
+        rotation.y = p * Math.PI * 2.2;
+        rotation.z = Math.sin(t * 8) * 0.2;
         break;
       }
       case "jump": {
-        // A small anticipation squat right before the hop, then the arc --
-        // hopping slightly to one side rather than straight up in place.
-        const squat = p < 0.12 ? -0.08 * Math.sin((p / 0.12) * Math.PI) : 0;
-        position.x = 0.2 * Math.sin(p * Math.PI);
-        position.y = 0.38 * (4 * p * (1 - p)) + squat * 0.3;
-        const bounce = 1 - 0.1 * Math.cos(p * Math.PI * 2) + squat;
+        // A small anticipation squat right before the hop, then a bigger arc
+        // -- hopping further to one side rather than straight up in place,
+        // and landing with an anime.js outBounce settle instead of a plain
+        // cosine wobble.
+        const squat = p < 0.12 ? -0.1 * Math.sin((p / 0.12) * Math.PI) : 0;
+        position.x = 0.32 * Math.sin(p * Math.PI);
+        position.y = 0.58 * (4 * p * (1 - p)) + squat * 0.3;
+        const bounce = 1 - 0.14 * (1 - EASE_OUT_BOUNCE(Math.min(p * 2, 1))) * Math.sin(p * Math.PI) + squat;
         if (emotion === "surprised") {
           // "!" reads as an excited puff-up mid-air -- no separate wings to
           // spread on this mesh, so a wider (not just taller) bounce stands
           // in for "wings out", peaking at the top of the hop.
-          const puff = 0.28 * Math.sin(p * Math.PI);
+          const puff = 0.4 * Math.sin(p * Math.PI);
           scale.set(bounce + puff, bounce, bounce + puff * 0.6);
         } else {
           scale.set(bounce, bounce, bounce);
@@ -503,9 +527,9 @@ export class ThreeCharacterRenderer implements CharacterRenderer {
         break;
       }
       case "approach": {
-        const ease = 1 - Math.cos((p * Math.PI) / 2);
-        position.z = 0.35 * ease;
-        scale.setScalar(1 + 0.08 * ease);
+        const ease = EASE_OUT_BACK(p);
+        position.z = 0.5 * ease;
+        scale.setScalar(1 + 0.14 * ease);
         break;
       }
     }
