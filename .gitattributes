@@ -1,0 +1,19 @@
+# Force LF regardless of a contributor's local core.autocrlf -- these run as
+# shell scripts and config files on Linux/Raspberry Pi; a CRLF line ending on
+# the shebang line breaks execution there ("bad interpreter: ...bash^M").
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.service.example text eol=lf
+*.desktop.example text eol=lf
+
+# Binary assets -- never touch line endings in these regardless of the rule
+# above (git already detects most of these, but be explicit for the ones
+# this repo actually carries).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.mp4 binary
+*.glb binary
+*.db binary

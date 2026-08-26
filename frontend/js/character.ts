@@ -292,9 +292,13 @@ export class ThreeCharacterRenderer implements CharacterRenderer {
     let gltf: Awaited<ReturnType<GLTFLoader["loadAsync"]>>;
     try {
       gltf = await loader.loadAsync(MODEL_SRC);
-    } catch {
+    } catch (error) {
       // No model available (e.g. offline dev checkout without the generated
-      // asset) -- render an empty stage rather than breaking the Kiosk_UI.
+      // asset, a 404, or a decode failure) -- render an empty stage rather
+      // than breaking the Kiosk_UI. Logged (rather than fully silent) so a
+      // real failure leaves a trace in devtools instead of just "nothing
+      // shows up, no clue why".
+      console.error(`Character_Renderer: failed to load ${MODEL_SRC}, rendering an empty stage.`, error);
       return;
     }
 
@@ -591,6 +595,17 @@ export class ThreeCharacterRenderer implements CharacterRenderer {
  * to the element with id {@link CHARACTER_ROOT_ID} when no element is provided.
  * Throws if no suitable root element can be found.
  */
+/** No-op {@link CharacterRenderer} used when 3D rendering genuinely isn't
+ * available on this device (see createCharacterRenderer) -- the character
+ * area just stays empty rather than the whole Kiosk_UI's JS failing to run. */
+class NullCharacterRenderer implements CharacterRenderer {
+  render(): void {}
+  startLipSync(): void {}
+  stopLipSync(): void {}
+  playIdle(): void {}
+  playListening(): void {}
+}
+
 export function createCharacterRenderer(root?: HTMLElement): CharacterRenderer {
   const element = root ?? document.getElementById(CHARACTER_ROOT_ID);
   if (!element) {
@@ -598,5 +613,17 @@ export function createCharacterRenderer(root?: HTMLElement): CharacterRenderer {
       `Character_Renderer: no root element provided and no element with id "${CHARACTER_ROOT_ID}" found.`,
     );
   }
-  return new ThreeCharacterRenderer(element);
+  try {
+    return new ThreeCharacterRenderer(element);
+  } catch (error) {
+    // Constructing THREE.WebGLRenderer throws synchronously when WebGL is
+    // genuinely unavailable (blocked/broken GPU driver -- seen on some
+    // constrained devices like an older Raspberry Pi's Chromium). Uncaught,
+    // that exception would propagate out of startKiosk() and stop the rest
+    // of its setup (chat, order board, QR, everything after this call) from
+    // ever running -- fail soft instead, same spirit as loadModel() below
+    // rendering an empty stage rather than breaking the Kiosk_UI.
+    console.error("Character_Renderer: 3D rendering unavailable, falling back to no-op.", error);
+    return new NullCharacterRenderer();
+  }
 }
