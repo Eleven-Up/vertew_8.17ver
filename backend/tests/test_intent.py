@@ -1,18 +1,18 @@
 import pytest
+from fastapi.testclient import TestClient
 
 import commerce_api
 from db import DataStore
 from intent import analyze_transcript, detect_language
 from main import app
-from fastapi.testclient import TestClient
 
 
 @pytest.mark.parametrize(
     ("text", "language"),
     [
-        ("이거 망고예요?", "ko"),
-        ("How much is the mango?", "en"),
-        ("Berapa harga mangga ini?", "ms"),
+        ("이거 나시고랭이에요?", "ko"),
+        ("How much is the nasi goreng?", "en"),
+        ("Berapa harga nasi goreng ini?", "ms"),
     ],
 )
 def test_detects_supported_languages_with_high_confidence(text, language):
@@ -27,7 +27,7 @@ def test_low_confidence_keeps_current_language():
 
 @pytest.mark.parametrize(
     "text",
-    ["주문하고 싶어요", "I'll take one mango", "Saya mahu beli mangga"],
+    ["주문하고 싶어요", "I'll take one nasi goreng", "Saya mahu beli nasi goreng"],
 )
 def test_purchase_intent_is_semantically_detected(text):
     result = analyze_transcript(text)
@@ -58,6 +58,34 @@ def test_analysis_api_updates_session_language(tmp_path):
         assert response.json()["language"] == "ko"
         assert response.json()["current_language"] == "ko"
         assert response.json()["intent"] == "purchase"
+    finally:
+        app.dependency_overrides.pop(commerce_api.get_data_store, None)
+        store.close()
+
+
+def test_analysis_api_prefers_confident_whisper_language_for_short_speech(tmp_path):
+    store = DataStore(str(tmp_path / "whisper-language.db"))
+    store.seed_demo_data()
+    app.dependency_overrides[commerce_api.get_data_store] = lambda: store
+    client = TestClient(app)
+    try:
+        session = client.post("/api/sessions", json={"store_id": "demo"}).json()
+        client.patch(
+            f"/api/sessions/{session['id']}/language",
+            json={"language": "ko", "language_source": "user_selected"},
+        )
+        response = client.post(
+            "/api/ai/analyze-transcript",
+            json={
+                "session_id": session["id"],
+                "transcript": "tolong satu",
+                "detected_language": "ms",
+                "language_confidence": 0.95,
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["language"] == "ms"
+        assert response.json()["current_language"] == "ms"
     finally:
         app.dependency_overrides.pop(commerce_api.get_data_store, None)
         store.close()

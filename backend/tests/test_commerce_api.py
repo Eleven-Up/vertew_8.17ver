@@ -24,18 +24,17 @@ def test_menu_contains_multilingual_demo_products(tmp_path):
         assert response.status_code == 200
         products = response.json()["products"]
         assert [product["id"] for product in products] == [
-            "watermelon",
-            "mango",
-            "apple_mango",
-            "gold_mango",
-            "banana",
-            "apple",
+            "nasi_lemak",
+            "tteokbokki",
+            "nasi_goreng",
+            "beef_noodle_soup",
+            "hainan_chicken_rice",
         ]
-        mango = products[1]
-        assert mango["name"] == {"en": "Mango", "ko": "망고", "ms": "Mangga"}
-        assert mango["price_minor"] == 500
-        assert mango["currency"] == "MYR"
-        assert mango["origin"] == {"en": "Chiang Mai, Thailand", "ko": "태국 치앙마이", "ms": "Chiang Mai, Thailand"}
+        tteokbokki = products[1]
+        assert tteokbokki["name"] == {"en": "Tteokbokki", "ko": "떡볶이", "ms": "Tteokbokki"}
+        assert tteokbokki["price_minor"] == 600
+        assert tteokbokki["currency"] == "MYR"
+        assert tteokbokki["origin"] == {"en": "Seoul, South Korea", "ko": "대한민국 서울", "ms": "Seoul, Korea Selatan"}
 
         media = client.get("/api/stores/demo/media")
         assert media.status_code == 200
@@ -103,8 +102,8 @@ def test_order_creation_totals_and_status_transitions(tmp_path):
                 "store_id": "demo",
                 "session_id": session["id"],
                 "items": [
-                    {"product_id": "mango", "quantity": 1},
-                    {"product_id": "apple", "quantity": 2},
+                    {"product_id": "nasi_goreng", "quantity": 1},
+                    {"product_id": "tteokbokki", "quantity": 2},
                 ],
                 "customer_language": "ko",
                 "order_source": "qr",
@@ -114,7 +113,7 @@ def test_order_creation_totals_and_status_transitions(tmp_path):
         order = response.json()
         assert order["order_number"] == 1
         assert order["status"] == "PENDING"
-        assert order["total_minor"] == 1200
+        assert order["total_minor"] == 2000
 
         invalid = client.patch(
             f"/api/orders/{order['id']}/status", json={"status": "READY"}
@@ -143,7 +142,7 @@ def test_order_rejects_unknown_product(tmp_path):
             json={
                 "store_id": "demo",
                 "session_id": session["id"],
-                "items": [{"product_id": "dragonfruit", "quantity": 1}],
+                "items": [{"product_id": "laksa", "quantity": 1}],
                 "customer_language": "en",
             },
         )
@@ -161,16 +160,16 @@ def test_order_item_note_is_recorded_and_returned(tmp_path):
             json={
                 "store_id": "demo",
                 "session_id": session["id"],
-                "items": [{"product_id": "mango", "quantity": 1, "note": "no cilantro please"}],
+                "items": [{"product_id": "nasi_goreng", "quantity": 1, "note": "extra spicy please"}],
                 "customer_language": "en",
             },
         )
         assert response.status_code == 201
         order = response.json()
-        assert order["items"][0]["note"] == "no cilantro please"
+        assert order["items"][0]["note"] == "extra spicy please"
 
         fetched = client.get(f"/api/orders/{order['id']}").json()
-        assert fetched["items"][0]["note"] == "no cilantro please"
+        assert fetched["items"][0]["note"] == "extra spicy please"
     finally:
         _close(store)
 
@@ -182,13 +181,13 @@ def test_draft_checkout_carries_item_note_into_the_order(tmp_path):
         session_id = session["id"]
         client.patch(
             f"/api/sessions/{session_id}/draft",
-            json={"items": [{"product_id": "banana", "quantity": 2, "note": "extra ripe"}]},
+            json={"items": [{"product_id": "nasi_lemak", "quantity": 2, "note": "extra sambal"}]},
         )
         draft = client.get(f"/api/sessions/{session_id}/draft").json()
-        assert draft["items"][0]["note"] == "extra ripe"
+        assert draft["items"][0]["note"] == "extra sambal"
 
         order = client.post(f"/api/sessions/{session_id}/draft/checkout").json()
-        assert order["items"][0]["note"] == "extra ripe"
+        assert order["items"][0]["note"] == "extra sambal"
     finally:
         _close(store)
 
@@ -198,11 +197,11 @@ def test_stock_reaches_zero_marks_product_unavailable(tmp_path):
     try:
         created = client.post(
             "/api/stores/demo/products",
-            json={"name_en": "Dragonfruit", "price_minor": 600, "stock_count": 2},
+            json={"name_en": "Popiah", "price_minor": 600, "stock_count": 2},
         )
         assert created.status_code == 201
         product = created.json()
-        assert product["id"] == "dragonfruit"
+        assert product["id"] == "popiah"
         assert product["available"] is True
 
         session = client.post("/api/sessions", json={"store_id": "demo"}).json()
@@ -211,22 +210,22 @@ def test_stock_reaches_zero_marks_product_unavailable(tmp_path):
             json={
                 "store_id": "demo",
                 "session_id": session["id"],
-                "items": [{"product_id": "dragonfruit", "quantity": 2}],
+                "items": [{"product_id": "popiah", "quantity": 2}],
                 "customer_language": "en",
             },
         )
 
         menu = client.get("/api/stores/demo/menu").json()["products"]
-        dragonfruit = next(item for item in menu if item["id"] == "dragonfruit")
-        assert dragonfruit["stock_count"] == 0
-        assert dragonfruit["available"] is False
+        popiah = next(item for item in menu if item["id"] == "popiah")
+        assert popiah["stock_count"] == 0
+        assert popiah["available"] is False
 
         rejected = client.post(
             "/api/orders",
             json={
                 "store_id": "demo",
                 "session_id": session["id"],
-                "items": [{"product_id": "dragonfruit", "quantity": 1}],
+                "items": [{"product_id": "popiah", "quantity": 1}],
                 "customer_language": "en",
             },
         )
@@ -240,12 +239,12 @@ def test_vendor_can_edit_and_delete_a_menu_item(tmp_path):
     try:
         created = client.post(
             "/api/stores/demo/products",
-            json={"name_en": "Papaya", "price_minor": 450, "stock_count": 10},
+            json={"name_en": "Rojak", "price_minor": 450, "stock_count": 10},
         ).json()
 
         updated = client.patch(
             f"/api/stores/demo/products/{created['id']}",
-            json={"name_en": "Papaya", "price_minor": 500, "stock_count": 5, "available": True},
+            json={"name_en": "Rojak", "price_minor": 500, "stock_count": 5, "available": True},
         )
         assert updated.status_code == 200
         assert updated.json()["price_minor"] == 500
@@ -256,7 +255,7 @@ def test_vendor_can_edit_and_delete_a_menu_item(tmp_path):
 
         missing = client.patch(
             f"/api/stores/demo/products/{created['id']}",
-            json={"name_en": "Papaya", "price_minor": 500, "stock_count": 5},
+            json={"name_en": "Rojak", "price_minor": 500, "stock_count": 5},
         )
         assert missing.status_code == 404
     finally:
@@ -272,7 +271,7 @@ def test_ready_status_broadcasts_to_hologram_session(tmp_path):
             json={
                 "store_id": "demo",
                 "session_id": session["id"],
-                "items": [{"product_id": "mango", "quantity": 1}],
+                "items": [{"product_id": "nasi_goreng", "quantity": 1}],
                 "customer_language": "ko",
             },
         ).json()

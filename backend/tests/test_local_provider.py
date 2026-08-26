@@ -8,6 +8,7 @@ client.
 
 import asyncio
 
+import httpx
 import pytest
 
 from llm import (
@@ -80,3 +81,19 @@ def test_factchat_generate_without_key_raises(monkeypatch):
     client = build_client_for_provider("factchat")
     with pytest.raises(GeminiUnavailableError):
         asyncio.run(client.generate("hello"))
+
+
+def test_openai_compatible_client_ignores_stale_system_proxy(monkeypatch):
+    created_options: dict = {}
+    fake = _FakeHTTP('{"text": "hi", "emotion": "happy", "gesture": "nod"}')
+
+    def fake_async_client(**options):
+        created_options.update(options)
+        return fake
+
+    monkeypatch.setattr(httpx, "AsyncClient", fake_async_client)
+    client = OpenAICompatibleClient(api_key="", require_api_key=False)
+
+    asyncio.run(client.generate("hello"))
+
+    assert created_options["trust_env"] is False

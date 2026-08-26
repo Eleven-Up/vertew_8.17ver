@@ -9,17 +9,17 @@ from difflib import SequenceMatcher
 LANGUAGE_CONFIDENCE_THRESHOLD = 0.8
 
 MALAY_MARKERS = {
-    "apa", "berapa", "ini", "mahu", "nak", "beli", "pesan", "mangga",
-    "pisang", "tembikai", "epal", "segar", "manis", "harga",
+    "apa", "berapa", "ini", "mahu", "nak", "beli", "pesan", "boleh",
+    "sila", "segar", "manis", "harga",
 }
 ENGLISH_MARKERS = {
-    "what", "how", "this", "want", "buy", "order", "mango", "banana",
-    "watermelon", "apple", "fresh", "sweet", "price", "much",
+    "what", "how", "this", "want", "buy", "order", "please", "can",
+    "fresh", "sweet", "price", "much",
 }
 INTEREST_PHRASES = {
-    "ko": ("이게 뭐지", "뭐 파는 거야", "이건 뭐야", "과일 파네"),
-    "en": ("what is this", "what are they selling", "what's that", "oh mango"),
-    "ms": ("apa ini", "jual apa", "ada mangga", "buah apa"),
+    "ko": ("이게 뭐지", "뭐 파는 거야", "이건 뭐야", "나시고랭 파네"),
+    "en": ("what is this", "what are they selling", "what's that", "oh nasi goreng"),
+    "ms": ("apa ini", "jual apa", "ada nasi goreng", "makanan apa"),
 }
 PURCHASE_PHRASES = {
     "ko": ("주문하고 싶", "살게요", "사고 싶", "하나 주세요", "주문할게"),

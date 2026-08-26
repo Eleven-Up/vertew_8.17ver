@@ -97,7 +97,11 @@ export interface KioskControllerDeps {
   renderer: CharacterRenderer;
   view: KioskView;
   /** Forwarded a non-empty transcript when a turn is sent to the server. */
-  onSendTranscript?: (text: string) => void;
+  onSendTranscript?: (
+    text: string,
+    detectedLanguage?: string,
+    languageConfidence?: number,
+  ) => void;
   /** Notified whenever the conversation state changes (for page-level visuals). */
   onStateChange?: (state: UIState) => void;
 }
@@ -112,7 +116,11 @@ export class KioskController {
   private readonly tts: TtsEngine;
   private readonly renderer: CharacterRenderer;
   private readonly view: KioskView;
-  private readonly onSendTranscript?: (text: string) => void;
+  private readonly onSendTranscript?: (
+    text: string,
+    detectedLanguage?: string,
+    languageConfidence?: number,
+  ) => void;
   private readonly onStateChange?: (state: UIState) => void;
 
   private _state: UIState = "idle";
@@ -161,7 +169,11 @@ export class KioskController {
   }
 
   /** A transcript from the Speech_Module (meaningful only while listening). */
-  onTranscript(text: string): void {
+  onTranscript(
+    text: string,
+    detectedLanguage?: string,
+    languageConfidence?: number,
+  ): void {
     if (this._state !== "listening") return;
     if (!isNonEmptyTranscript(text)) {
       this.handleNoMatch();
@@ -171,7 +183,7 @@ export class KioskController {
     this.stt.stop();
     this.view.hideListeningIndicator();
     this.setState("processing");
-    this.onSendTranscript?.(text);
+    this.onSendTranscript?.(text, detectedLanguage, languageConfidence);
   }
 
   /** A response from the Conversation_Server (meaningful only while processing). */
@@ -208,7 +220,7 @@ export class KioskController {
     if (this._state !== "listening") return;
     switch (r.kind) {
       case "transcript":
-        this.onTranscript(r.text);
+        this.onTranscript(r.text, r.detectedLanguage, r.languageConfidence);
         return;
       case "no-match":
         this.handleNoMatch();

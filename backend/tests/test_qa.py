@@ -100,7 +100,7 @@ def test_parse_reads_action_and_matched_qa_id():
 def test_parse_defaults_for_missing_or_invalid_action():
     resp = llm.parse(
         '{"text": "Hi!", "emotion": "happy", "gesture": "wave", '
-        '"action": "banana", "matched_qa_id": ""}'
+        '"action": "dance", "matched_qa_id": ""}'
     )
     assert resp.action == "answer"  # invalid action falls back
     assert resp.matched_qa_id is None  # empty string -> None
@@ -152,15 +152,15 @@ def test_curated_hit_is_not_relearned():
 def test_generated_answer_becomes_pending_qa():
     store = _seeded_store()
     client = _CapturingClient(
-        '{"text": "Yes, we have durian in season.", "emotion": "happy", '
+        '{"text": "Yes, we have rendang today.", "emotion": "happy", '
         '"gesture": "nod"}'  # no matched_qa_id -> generated
     )
     try:
-        response = _run(store, client, "Do you have durian?")
+        response = _run(store, client, "Do you have rendang?")
         assert response.matched_qa_id is None
         pending = store.list_qa("demo", status="pending")
         assert len(pending) == 1
-        assert pending[0].question == "Do you have durian?"
+        assert pending[0].question == "Do you have rendang?"
         assert pending[0].source == "generated"
     finally:
         store.close()

@@ -362,9 +362,11 @@ def _local_response(
                 matched, lang, asks_spice, asks_ingredient, asks_allergen
             )
 
-    prices = {"watermelon": 4, "mango": 5, "banana": 3, "apple": 3.5,
-              "수박": 4, "망고": 5, "바나나": 3, "사과": 3.5,
-              "tembikai": 4, "mangga": 5, "pisang": 3, "epal": 3.5}
+    prices = {"nasi lemak": 7, "나시 르막": 7,
+              "tteokbokki": 6, "떡볶이": 6,
+              "nasi goreng": 8, "나시 고렝": 8, "나시고랭": 8,
+              "beef noodle soup": 8.5, "우육면": 8.5,
+              "hainanese chicken rice": 7.5, "chicken rice": 7.5, "하이난": 7.5, "치킨 라이스": 7.5}
     product = next(((name, price) for name, price in prices.items() if name in text), None)
     asks_price = any(word in text for word in ("price", "how much", "얼마", "가격", "berapa", "harga"))
     wants_order = any(word in text for word in ("order", "buy", "take one", "주문", "살게", "주세요", "pesan", "beli"))
@@ -378,7 +380,7 @@ def _local_response(
                   "ko": "좋아요! QR 코드를 스캔해서 주문해 주세요.",
                   "ms": "Baik! Sila imbas kod QR untuk membuat pesanan."}
     else:
-        copies = {"en": "We have fresh watermelon, mango, banana, and apple. What would you like?",
-                  "ko": "신선한 수박, 망고, 바나나, 사과가 있어요. 어떤 과일을 원하세요?",
-                  "ms": "Kami ada tembikai, mangga, pisang dan epal segar. Anda mahu yang mana?"}
+        copies = {"en": "We have nasi lemak, tteokbokki, nasi goreng, beef noodle soup, and Hainanese chicken rice. What would you like?",
+                  "ko": "나시 르막, 떡볶이, 나시 고렝, 우육면, 하이난 치킨 라이스가 있어요. 어떤 메뉴를 원하세요?",
+                  "ms": "Kami ada nasi lemak, tteokbokki, nasi goreng, mi sup daging dan nasi ayam Hainan. Anda mahu yang mana?"}
     return CharacterResponse(copies[lang], "happy", "wave" if wants_order else "nod", True)

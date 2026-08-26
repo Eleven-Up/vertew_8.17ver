@@ -318,9 +318,9 @@ function ProductForm(
       <label className="inline-check"><input type="checkbox" checked={form.available}
         onChange={(e) => update("available", e.target.checked)}/> Available</label>
     </div>
-    <label>Image URL<input value={form.image} onChange={(e) => update("image", e.target.value)} placeholder="/images/mango.png or https://…"/></label>
+    <label>Image URL<input value={form.image} onChange={(e) => update("image", e.target.value)} placeholder="/images/nasi_goreng.png or https://…"/></label>
     <div className="rowfields">
-      <label>Origin (English)<input value={form.origin_en} onChange={(e) => update("origin_en", e.target.value)} placeholder="e.g. Sarawak, Malaysia"/></label>
+      <label>Origin (English)<input value={form.origin_en} onChange={(e) => update("origin_en", e.target.value)} placeholder="e.g. Penang, Malaysia"/></label>
       <label>Origin (한국어)<input value={form.origin_ko} onChange={(e) => update("origin_ko", e.target.value)}/></label>
       <label>Origin (Melayu)<input value={form.origin_ms} onChange={(e) => update("origin_ms", e.target.value)}/></label>
     </div>

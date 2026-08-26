@@ -35,7 +35,7 @@ function bindControls() {
     required("language").textContent = result.current_language.toUpperCase(); required("intent").textContent = `${result.intent} · ${(result.confidence*100).toFixed(0)}%`;
   })));
   required("create-order").addEventListener("click", () => void run(async () => {
-    order = await request<Order>("/api/orders", { method:"POST", body:JSON.stringify({ store_id:storeId, session_id:session.id, items:[{ product_id:"mango",quantity:1 }], customer_language:required("language").textContent?.toLowerCase() || "en", order_source:"qr" }) }); updateOrder();
+    order = await request<Order>("/api/orders", { method:"POST", body:JSON.stringify({ store_id:storeId, session_id:session.id, items:[{ product_id:"nasi_goreng",quantity:1 }], customer_language:required("language").textContent?.toLowerCase() || "en", order_source:"qr" }) }); updateOrder();
   }));
   document.querySelectorAll<HTMLButtonElement>("[data-status]").forEach((button) => button.addEventListener("click", () => void run(async () => {
     if (!order) throw new Error("Create an order first");

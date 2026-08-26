@@ -159,16 +159,16 @@ CREATE TABLE IF NOT EXISTS qa_entries (
 # spice_level is 0..3 (0 = not spicy); allergens are canonical lowercase English
 # tags (empty = none declared). These structured fields are what the assistant
 # reads to answer "what is in this?" / "how spicy is it?" / "where is this
-# from?" questions. Mango has three distinct varieties (regular/apple/gold),
-# each its own catalog entry with its own price/image/origin -- not sub-items
-# of one "mango" product.
+# from?" questions -- spice_level in particular grounds the most common
+# customization request at a street-food stall ("kurang pedas" / less spicy,
+# "extra pedas" / extra spicy). The demo lineup is one signature street dish
+# per country, not a single-cuisine menu.
 DEMO_PRODUCTS = (
-    ("watermelon", {"en": "Watermelon", "ko": "수박", "ms": "Tembikai"}, {"en": "Cool and refreshing watermelon", "ko": "시원하고 상쾌한 수박", "ms": "Tembikai yang sejuk dan menyegarkan"}, 400, "/images/watermelon.png", 0, {"en": "Fresh-cut watermelon, nothing added", "ko": "갓 자른 수박, 첨가물 없음", "ms": "Tembikai potong segar, tanpa tambahan"}, (), {"en": "Sarawak, Malaysia", "ko": "말레이시아 사라왁", "ms": "Sarawak, Malaysia"}),
-    ("mango", {"en": "Mango", "ko": "망고", "ms": "Mangga"}, {"en": "Sweet and fresh mango", "ko": "달고 신선한 망고", "ms": "Mangga manis dan segar"}, 500, "/images/mango.png", 0, {"en": "Fresh mango", "ko": "신선한 망고", "ms": "Mangga segar"}, (), {"en": "Chiang Mai, Thailand", "ko": "태국 치앙마이", "ms": "Chiang Mai, Thailand"}),
-    ("apple_mango", {"en": "Apple Mango", "ko": "애플망고", "ms": "Mangga Epal"}, {"en": "Small, round mango with dark red-blushed skin and rich, dense flesh", "ko": "껍질이 진한 적색을 띠는 작고 동그란 망고로 과육이 진하고 부드러워요", "ms": "Mangga bulat kecil berkulit merah gelap dengan isi yang padat dan kaya rasa"}, 700, "/images/apple_mango.png", 0, {"en": "Fresh apple mango", "ko": "신선한 애플망고", "ms": "Mangga epal segar"}, (), {"en": "Tainan, Taiwan", "ko": "대만 타이난", "ms": "Tainan, Taiwan"}),
-    ("gold_mango", {"en": "Gold Mango", "ko": "골드망고", "ms": "Mangga Emas"}, {"en": "Elongated golden-yellow mango, very sweet with a smooth, fiber-free flesh", "ko": "길쭉한 황금빛 망고로 매우 달고 과육이 부드러워요", "ms": "Mangga kuning-emas lonjong, sangat manis dengan isi yang lembut"}, 650, "/images/gold_mango.png", 0, {"en": "Fresh gold mango", "ko": "신선한 골드망고", "ms": "Mangga emas segar"}, (), {"en": "Guimaras, Philippines", "ko": "필리핀 기마라스", "ms": "Guimaras, Filipina"}),
-    ("banana", {"en": "Banana", "ko": "바나나", "ms": "Pisang"}, {"en": "Soft and naturally sweet banana", "ko": "부드럽고 자연스럽게 달콤한 바나나", "ms": "Pisang lembut dan manis semula jadi"}, 300, "/images/banana.png", 0, {"en": "Fresh banana", "ko": "신선한 바나나", "ms": "Pisang segar"}, (), {"en": "Johor, Malaysia", "ko": "말레이시아 조호르", "ms": "Johor, Malaysia"}),
-    ("apple", {"en": "Apple", "ko": "사과", "ms": "Epal"}, {"en": "Crisp and juicy apple", "ko": "아삭하고 과즙이 풍부한 사과", "ms": "Epal rangup dan berjus"}, 350, "/images/apple.png", 0, {"en": "Fresh-cut apple", "ko": "갓 자른 사과", "ms": "Epal potong segar"}, (), {"en": "Nagano, Japan", "ko": "일본 나가노", "ms": "Nagano, Jepun"}),
+    ("nasi_lemak", {"en": "Nasi Lemak", "ko": "나시 르막", "ms": "Nasi Lemak"}, {"en": "Coconut rice with sambal, fried anchovies, peanuts and egg", "ko": "삼발소스, 멸치튀김, 땅콩, 계란을 곁들인 코코넛 밥", "ms": "Nasi santan dengan sambal, ikan bilis, kacang dan telur"}, 700, "/images/nasi_lemak.png", 2, {"en": "coconut rice, sambal, anchovies, peanuts, egg", "ko": "코코넛 밥, 삼발소스, 멸치, 땅콩, 계란", "ms": "nasi lemak, sambal, ikan bilis, kacang, telur"}, ("peanuts", "egg"), {"en": "Kuala Lumpur, Malaysia", "ko": "말레이시아 쿠알라룸푸르", "ms": "Kuala Lumpur, Malaysia"}),
+    ("tteokbokki", {"en": "Tteokbokki", "ko": "떡볶이", "ms": "Tteokbokki"}, {"en": "Chewy rice cakes simmered in a spicy-sweet gochujang sauce", "ko": "매콤달콤한 고추장 소스에 조린 쫄깃한 떡", "ms": "Kuih beras kenyal dimasak dalam sos gochujang pedas-manis"}, 600, "/images/tteokbokki.png", 2, {"en": "rice cakes, gochujang, fish cake, scallion", "ko": "떡, 고추장, 어묵, 파", "ms": "kuih beras, gochujang, kek ikan, daun bawang"}, ("gluten", "fish"), {"en": "Seoul, South Korea", "ko": "대한민국 서울", "ms": "Seoul, Korea Selatan"}),
+    ("nasi_goreng", {"en": "Nasi Goreng", "ko": "나시 고렝", "ms": "Nasi Goreng Ayam"}, {"en": "Wok-fried rice with chicken, egg and sambal", "ko": "닭고기, 계란, 삼발소스로 볶은 인도네시아식 볶음밥", "ms": "Nasi digoreng dengan ayam, telur dan sambal"}, 800, "/images/nasi_goreng.png", 2, {"en": "rice, chicken, egg, sambal, shallots", "ko": "밥, 닭고기, 계란, 삼발소스, 샬롯", "ms": "nasi, ayam, telur, sambal, bawang merah"}, ("egg",), {"en": "Jakarta, Indonesia", "ko": "인도네시아 자카르타", "ms": "Jakarta, Indonesia"}),
+    ("beef_noodle_soup", {"en": "Beef Noodle Soup", "ko": "우육면", "ms": "Mi Sup Daging Taiwan"}, {"en": "Slow-braised beef and noodles in a rich five-spice broth", "ko": "오향 육수에 푹 끓인 소고기와 면", "ms": "Mi dengan daging lembu direneh dalam sup lima rempah"}, 850, "/images/beef_noodle_soup.png", 1, {"en": "wheat noodles, beef shank, star anise, soy sauce, scallion", "ko": "밀면, 소고기 사태, 팔각, 간장, 파", "ms": "mi gandum, daging lembu, bunga lawang, kicap, daun bawang"}, ("gluten", "soy"), {"en": "Taipei, Taiwan", "ko": "대만 타이베이", "ms": "Taipei, Taiwan"}),
+    ("hainan_chicken_rice", {"en": "Hainanese Chicken Rice", "ko": "하이난 치킨 라이스", "ms": "Nasi Ayam Hainan"}, {"en": "Poached chicken with fragrant rice and ginger-chili sauce", "ko": "생강고추소스를 곁들인 촉촉한 삶은 닭고기와 향긋한 밥", "ms": "Ayam rebus dengan nasi wangi dan sos halia-cili"}, 750, "/images/hainan_chicken_rice.png", 1, {"en": "rice, poached chicken, ginger, chili sauce, cucumber", "ko": "밥, 삶은 닭고기, 생강, 고추소스, 오이", "ms": "nasi, ayam rebus, halia, sos cili, timun"}, (), {"en": "Hainan, China / Singapore", "ko": "중국 하이난 / 싱가포르", "ms": "Hainan, China / Singapura"}),
 )
 
 # Demo FAQ/Q&A knowledge base. Each entry is (id, question, answer{lang}, category).
@@ -186,15 +186,25 @@ DEMO_QA = (
         "ms": "Kami buka setiap petang dari jam 6 hingga tengah malam.",
     }, "hours"),
     ("qa_halal", "Is the food halal?", {
-        "en": "We sell only fresh-cut fruit with nothing added, so it suits a halal diet.",
-        "ko": "저희는 첨가물 없이 갓 자른 과일만 팔아서 할랄 식단에도 괜찮아요.",
-        "ms": "Kami hanya menjual buah potong segar tanpa tambahan, jadi sesuai untuk diet halal.",
+        "en": "Yes, we cook everything in a halal-certified kitchen with halal ingredients.",
+        "ko": "네, 저희는 할랄 인증 주방에서 할랄 재료로 요리해요.",
+        "ms": "Ya, kami memasak semuanya di dapur bersijil halal dengan bahan-bahan halal.",
     }, "diet"),
     ("qa_location", "Where will you be tomorrow?", {
         "en": "We move around the night market — check our sign or ask the owner for tomorrow's spot.",
         "ko": "야시장 안에서 자리를 옮겨요. 내일 위치는 간판을 보시거나 사장님께 여쭤봐 주세요.",
         "ms": "Kami berpindah di sekitar pasar malam — lihat papan tanda kami atau tanya tuan kedai untuk lokasi esok.",
     }, "location"),
+    ("qa_spice", "Can I choose how spicy it is?", {
+        "en": "Yes! Just tell us \"less spicy\" or \"extra spicy\" and we'll adjust it for you.",
+        "ko": "네! '덜 맵게' 또는 '더 맵게'라고 말씀해 주시면 맞춰드려요.",
+        "ms": "Boleh! Beritahu kami \"kurang pedas\" atau \"extra pedas\" dan kami akan sesuaikan.",
+    }, "customization"),
+    ("qa_cuisine", "Why do you have food from different countries?", {
+        "en": "We serve one signature street dish from a different country — Malaysia, Korea, Indonesia, Taiwan, and Singapore/Hainan.",
+        "ko": "매일 다른 나라의 대표 길거리 음식을 한 가지씩 선보여요 — 말레이시아, 한국, 인도네시아, 대만, 싱가포르/하이난까지.",
+        "ms": "Kami menghidangkan satu hidangan jalanan ikonik dari setiap negara — Malaysia, Korea, Indonesia, Taiwan, dan Singapura/Hainan.",
+    }, "menu"),
 )
 
 
@@ -376,7 +386,7 @@ class DataStore:
         with self._conn:
             self._conn.execute(
                 "INSERT OR IGNORE INTO stores (id, name, currency, created_at) VALUES (?, ?, ?, ?)",
-                ("demo", "Vertew Fresh Fruits", "MYR", now),
+                ("demo", "Vertew Street Kitchen", "MYR", now),
             )
             self._conn.executemany(
                 "INSERT OR IGNORE INTO products "

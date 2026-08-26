@@ -19,8 +19,9 @@ const MOCK_PAYMENT_DELAY_MS = 900;
 // phone -- there's no live push for the draft itself (unlike order-ready).
 const DRAFT_POLL_MS = 2000;
 
-const fruitEmoji: Record<string, string> = {
-  watermelon: "🍉", mango: "🥭", banana: "🍌", apple: "🍎",
+const dishEmoji: Record<string, string> = {
+  nasi_lemak: "🍛", tteokbokki: "🌶️", nasi_goreng: "🍚",
+  beef_noodle_soup: "🍜", hainan_chicken_rice: "🍗",
 };
 
 function storeIdFromPath(): string {
@@ -248,7 +249,7 @@ export function App() {
             {draft.items.map((item) => (
               <div className="cart-item" key={item.product_id}>
                 <div className="cart-row">
-                  <span className="cart-fruit">{fruitEmoji[item.product_id] ?? "🍏"}</span>
+                  <span className="cart-dish">{dishEmoji[item.product_id] ?? "🍽️"}</span>
                   <div><strong>{item.name[language] ?? item.name.en}</strong><small>{money(item.unit_price_minor)} {t.each}</small></div>
                   <div className="stepper">
                     <button onClick={() => void changeQuantity(item.product_id, -1)}>−</button>

@@ -3,12 +3,17 @@ import { createCharacterRenderer, type CharacterRenderer } from "./character.js"
 import { ChatClient, buildWsUrl } from "./chat.js";
 import { createChatLog } from "./chatlog.js";
 import { splitIntoBeats } from "./emotion-cues.js";
-import { analyzeTranscript, createCustomerSession, getActiveOrders, getCustomerSession, getReadyOrders, getSttConfig, EventVideoQueue, loadMediaConfig, StoreEventClient, type BoardOrder, type StoreEvent } from "./hologram.js";
+import { analyzeTranscript, createCustomerSession, getActiveOrders, getCustomerSession, getReadyOrders, getSttConfig, updateCustomerLanguage, EventVideoQueue, loadMediaConfig, StoreEventClient, type BoardOrder, type StoreEvent } from "./hologram.js";
 import { KioskController, createDomKioskView } from "./kiosk.js";
 import { LocalSttProvider, WebSpeechSttProvider, WebSpeechTtsEngine } from "./speech.js";
 import type { SttProvider } from "./types.js";
 
 const STORE_ID = "demo";
+type SupportedLanguage = "en" | "ko" | "ms";
+
+function isSupportedLanguage(value: unknown): value is SupportedLanguage {
+  return value === "en" || value === "ko" || value === "ms";
+}
 const ORDER_BOARD_EVENTS = new Set([
   "new_order", "order_accepted", "order_preparing", "order_ready", "order_completed", "order_rejected",
 ]);
@@ -31,7 +36,7 @@ const MOTION_SHOWCASE_GESTURES: [string, string][] = [
 // a question (head-tilt), an exclamation/offer (wings-out bounce), a
 // greeting (wave), and a price mention (point) -- see splitIntoBeats.
 const MOTION_SHOWCASE_REPLY =
-  "Have you tried our mangoes? They're on special today! Hi there, welcome to the stall. The price is RM 5.";
+  "Have you tried our nasi goreng? It's on special today! Hi there, welcome to the stall. The price is RM 8.";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -94,6 +99,28 @@ export async function startKiosk(): Promise<void> {
   const stt: SttProvider =
     sttConfig.provider === "local" ? new LocalSttProvider("en-US") : new WebSpeechSttProvider("en-US");
   const tts = new WebSpeechTtsEngine("en-US");
+  let currentLanguage: SupportedLanguage = isSupportedLanguage(session.language)
+    ? session.language
+    : "en";
+  const languageSelect = required<HTMLSelectElement>("language-label");
+  const applyLanguage = (language: SupportedLanguage): void => {
+    currentLanguage = language;
+    languageSelect.value = language;
+    const locale = speechLocale(language);
+    stt.setLanguage(locale);
+    tts.setLanguage(locale);
+  };
+  const chooseLanguage = async (language: SupportedLanguage): Promise<void> => {
+    const previous = currentLanguage;
+    applyLanguage(language);
+    try {
+      const updated = await updateCustomerLanguage(sessionId, language);
+      applyLanguage(isSupportedLanguage(updated.language) ? updated.language : language);
+    } catch {
+      applyLanguage(previous);
+    }
+  };
+  applyLanguage(currentLanguage);
   const view = createDomKioskView();
   const chatLog = createChatLog();
   const video = required<HTMLVideoElement>("hologram-video");
@@ -105,16 +132,19 @@ export async function startKiosk(): Promise<void> {
 
   const controller = new KioskController({
     stt, tts, renderer, view,
-    onSendTranscript: (text) => {
+    onSendTranscript: (text, detectedLanguage, languageConfidence) => {
       chatLog.addUser(text);
       chatLog.clearLiveCaption();
-      void analyzeTranscript(sessionId, text)
+      const whisperLanguage = isSupportedLanguage(detectedLanguage)
+        ? detectedLanguage
+        : undefined;
+      void analyzeTranscript(sessionId, text, whisperLanguage, languageConfidence)
         .then((result) => {
-          currentLanguage = result.current_language;
-          const locale = speechLocale(currentLanguage);
-          stt.setLanguage(locale);
-          tts.setLanguage(locale);
-          required("language-label").textContent = currentLanguage.toUpperCase();
+          applyLanguage(
+            isSupportedLanguage(result.current_language)
+              ? result.current_language
+              : currentLanguage,
+          );
           chat.send(text);
         })
         .catch(() => chat.send(text));
@@ -129,7 +159,6 @@ export async function startKiosk(): Promise<void> {
   chat.onNetworkError(() => controller.showError("network"));
   chat.connect();
 
-  let currentLanguage = session.language;
   const announcedOrders = new Set<string>();
   const eventUrl = buildStoreWsUrl(sessionId, debug ? "debug" : "hologram");
   const events = new StoreEventClient(eventUrl, (event) => void handleEvent(event), (connected) => {
@@ -149,11 +178,8 @@ export async function startKiosk(): Promise<void> {
     }
     if (event.type === "show_qr") showQr(true);
     if (event.type === "language_changed" && event.session_id === sessionId) {
-      currentLanguage = String(event.payload.language ?? "en");
-      required("language-label").textContent = currentLanguage.toUpperCase();
-      const locale = speechLocale(currentLanguage);
-      stt.setLanguage(locale);
-      tts.setLanguage(locale);
+      const language = event.payload.language;
+      if (isSupportedLanguage(language)) applyLanguage(language);
     }
     // The hologram is a shared store display: announce every ready order. The
     // event session identifies the customer/order, not the display connection.
@@ -227,7 +253,7 @@ export async function startKiosk(): Promise<void> {
     catch { /* keep showing the last known board; retried on the next tick */ }
   };
 
-  let readyDismissTimer: ReturnType<typeof window.setTimeout> | null = null;
+  let readyDismissTimer: number | null = null;
   async function announceReady(orderNumber: number, language: string): Promise<void> {
     const message = (readyCopy[language] ?? readyCopy.en)(orderNumber);
     required("ready-number").textContent = `#${orderNumber}`;
@@ -250,6 +276,11 @@ export async function startKiosk(): Promise<void> {
   });
   required("qr-panel").addEventListener("click", () => showQr(true));
   required("qr-close").addEventListener("click", () => showQr(false));
+  languageSelect.addEventListener("change", () => {
+    if (isSupportedLanguage(languageSelect.value)) {
+      void chooseLanguage(languageSelect.value);
+    }
+  });
   required("mode-toggle").addEventListener("click", () => {
     const next = document.body.dataset.display === "hologram" ? "tablet" : "hologram";
     document.body.dataset.display = next;
@@ -259,9 +290,9 @@ export async function startKiosk(): Promise<void> {
     button.addEventListener("click", () => events.send(button.dataset.debugEvent ?? "", { distance: Number(button.dataset.distance || 0) }));
   });
   required("debug-ready").addEventListener("click", () => void announceReady(12, currentLanguage));
-  required("debug-ko").addEventListener("click", () => { currentLanguage = "ko"; required("language-label").textContent = "KO"; });
-  required("debug-en").addEventListener("click", () => { currentLanguage = "en"; required("language-label").textContent = "EN"; });
-  required("debug-ms").addEventListener("click", () => { currentLanguage = "ms"; required("language-label").textContent = "MS"; });
+  required("debug-ko").addEventListener("click", () => void chooseLanguage("ko"));
+  required("debug-en").addEventListener("click", () => void chooseLanguage("en"));
+  required("debug-ms").addEventListener("click", () => void chooseLanguage("ms"));
   required("debug-transcript-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const input = required<HTMLInputElement>("debug-transcript-input");

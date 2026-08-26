@@ -371,7 +371,13 @@ class OpenAICompatibleClient:
 
         if self._http is None:
             # Keep-alive connection pool reused for the process lifetime.
-            self._http = httpx.AsyncClient(timeout=GEMINI_TIMEOUT_SECONDS + 5)
+            # Do not inherit machine-wide HTTP(S)_PROXY settings.  Kiosk hosts
+            # are often moved between networks, and a stale local proxy makes a
+            # healthy Groq endpoint look offline (STT already uses this policy).
+            self._http = httpx.AsyncClient(
+                timeout=GEMINI_TIMEOUT_SECONDS + 5,
+                trust_env=False,
+            )
 
         url = f"{self._base_url}{self._path}"
         headers = {"Content-Type": "application/json"}
@@ -490,13 +496,13 @@ async def complete(prompt: str, client: GeminiClient | None = None) -> RawRespon
             # attempt that the retry may replace. Log the real cause so operators can
             # see why a turn fell back to "temporarily unavailable".
             last_error = exc
-            logger.warning("Gemini attempt failed: %r", exc)
+            logger.warning("LLM provider attempt failed: %r", exc)
 
     logger.error(
-        "Gemini Flash call failed after %d attempts: %r",
+        "LLM provider call failed after %d attempts: %r",
         GEMINI_MAX_ATTEMPTS,
         last_error,
     )
     raise GeminiUnavailableError(
-        f"Gemini Flash call failed after {GEMINI_MAX_ATTEMPTS} attempts"
+        f"LLM provider call failed after {GEMINI_MAX_ATTEMPTS} attempts"
     ) from last_error

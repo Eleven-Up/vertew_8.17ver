@@ -9,11 +9,11 @@ import json
 import websockets
 
 QUESTIONS = [
-    "What's in this mango?",
-    "How spicy is the watermelon?",
+    "What's in the nasi goreng?",
+    "How spicy is the mee goreng?",
     "Is this halal?",
     "Can I pay by card?",
-    "Does anything have cilantro in it?",   # not on the menu -> generation/escalation
+    "Do you have rendang?",   # not on the menu -> generation/escalation
 ]
 
 URL = "ws://127.0.0.1:8000/ws"

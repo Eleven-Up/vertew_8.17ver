@@ -21,20 +21,107 @@ export const MIC_ACTIVATION_MS = 500;
 export const LISTENING_INDICATOR_MS = 200;
 
 /**
- * Continuous silence that marks end-of-utterance. Requirement 1.4 specifies 2s and
- * Requirement 2.2 specifies 3s; we use the upper bound of the 2-3s window so a brief
- * pause is not mistaken for the end of speech (Req 1.4 / Req 2.2).
+ * Continuous silence that marks end-of-utterance. Market orders are normally
+ * short, so finalize quickly instead of leaving the kiosk in Listening for 3s.
  */
-export const END_OF_SPEECH_SILENCE_MS = 3000;
+export const END_OF_SPEECH_SILENCE_MS = 900;
 
 /** If no speech is detected after activation, deactivate the mic (Req 1.7). */
-export const NO_SPEECH_TIMEOUT_MS = 10000;
+export const NO_SPEECH_TIMEOUT_MS = 4000;
 
 /** Hard cap on a single capture; audio so far is treated as a finished utterance (Req 1.6). */
-export const MAX_CAPTURE_MS = 30000;
+export const MAX_CAPTURE_MS = 10000;
 
 /** A transcript must come back within this budget after end-of-speech (Req 2.1 / 2.5). */
 export const STT_RESULT_TIMEOUT_MS = 5000;
+
+/**
+ * Market-mode foreground speech filter.
+ *
+ * Browser speech recognition doesn't expose beam-forming or speaker identity, so
+ * the kiosk independently watches a noise-suppressed microphone stream.  It learns
+ * the ambient floor at the start of each listen cycle and only accepts a transcript
+ * after a substantially louder signal has remained present long enough to be a
+ * nearby speaker rather than a short market-noise spike.
+ */
+export const FOREGROUND_CALIBRATION_MS = 300;
+export const FOREGROUND_HOLD_MS = 120;
+export const FOREGROUND_MIN_RMS = 0.012;
+export const FOREGROUND_MAX_RMS = 0.15;
+export const FOREGROUND_NOISE_MULTIPLIER = 1.6;
+export const FOREGROUND_NOISE_MARGIN = 0.004;
+
+/** Browser capture hints chosen for a noisy, single-speaker kiosk. */
+export const MARKET_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  channelCount: { ideal: 1 },
+  echoCancellation: { ideal: true },
+  noiseSuppression: { ideal: true },
+  // Automatic gain tends to amplify distant market conversations along with the
+  // intended customer, which works against the foreground gate.
+  autoGainControl: { ideal: false },
+};
+
+/** Adaptive level a voice must exceed to count as foreground speech. */
+export function foregroundVoiceThreshold(noiseFloor: number): number {
+  const adaptive = Math.max(0, noiseFloor) * FOREGROUND_NOISE_MULTIPLIER
+    + FOREGROUND_NOISE_MARGIN;
+  return Math.min(FOREGROUND_MAX_RMS, Math.max(FOREGROUND_MIN_RMS, adaptive));
+}
+
+/**
+ * Stateful, browser-independent foreground detector.  `observe` returns whether
+ * the current sample is above the adaptive gate; `detected` becomes true only after
+ * that condition has held continuously for `FOREGROUND_HOLD_MS`.
+ */
+export class ForegroundVoiceGate {
+  private readonly calibrationSamples: number[] = [];
+  private noiseFloor: number | null = null;
+  private foregroundSince: number | null = null;
+  private _detected = false;
+
+  constructor(private readonly startedAt: number) {}
+
+  get detected(): boolean {
+    return this._detected;
+  }
+
+  get threshold(): number {
+    return foregroundVoiceThreshold(this.noiseFloor ?? 0);
+  }
+
+  observe(rms: number, now: number): boolean {
+    const level = Number.isFinite(rms) ? Math.max(0, rms) : 0;
+    if (now - this.startedAt < FOREGROUND_CALIBRATION_MS) {
+      this.calibrationSamples.push(level);
+      return false;
+    }
+
+    if (this.noiseFloor === null) {
+      // A lower percentile is deliberately used: intermittent nearby clatter during
+      // calibration shouldn't raise the floor enough to silence the customer.
+      const sorted = [...this.calibrationSamples].sort((a, b) => a - b);
+      const index = Math.floor(Math.max(0, sorted.length - 1) * 0.3);
+      this.noiseFloor = sorted[index] ?? 0.007;
+    }
+
+    const threshold = this.threshold;
+    const above = level >= threshold;
+    if (above) {
+      this.foregroundSince ??= now;
+      if (now - this.foregroundSince >= FOREGROUND_HOLD_MS) {
+        this._detected = true;
+      }
+    } else {
+      this.foregroundSince = null;
+      // Slowly follow changes in steady ambient noise, but never learn a loud voice
+      // as part of the background while it is above the gate.
+      if (!this._detected && level < threshold * 0.8) {
+        this.noiseFloor = this.noiseFloor * 0.98 + level * 0.02;
+      }
+    }
+    return above;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Pure gating helpers (exported for reuse and property testing in 10.2/10.3)
@@ -170,6 +257,13 @@ export class WebSpeechSttProvider implements SttProvider {
   private speechStarted = false;
   private settled = false;
 
+  private foregroundStream: MediaStream | null = null;
+  private foregroundAudioCtx: AudioContext | null = null;
+  private foregroundRafId: number | null = null;
+  private foregroundMonitorToken = 0;
+  private foregroundDetected = false;
+  private foregroundMonitorBypassed = false;
+
   constructor(private lang: string = "en-US") {
     this.ctor = getSpeechRecognitionCtor();
   }
@@ -194,8 +288,12 @@ export class WebSpeechSttProvider implements SttProvider {
     }
 
     this.cleanupTimers();
+    this.stopForegroundMonitor();
     this.speechStarted = false;
     this.settled = false;
+    this.foregroundDetected = false;
+    this.foregroundMonitorBypassed = false;
+    this.startForegroundMonitor();
 
     let recognition: SpeechRecognitionLike;
     try {
@@ -213,8 +311,12 @@ export class WebSpeechSttProvider implements SttProvider {
     recognition.maxAlternatives = 1;
 
     recognition.onspeechstart = () => {
-      this.speechStarted = true;
-      this.clearTimer("noSpeech");
+      // When monitoring is unavailable, retain the historical Web Speech behavior.
+      // Otherwise only the independently measured nearby voice opens the gate.
+      if (this.foregroundMonitorBypassed) {
+        this.speechStarted = true;
+        this.clearTimer("noSpeech");
+      }
     };
 
     recognition.onspeechend = () => {
@@ -242,16 +344,18 @@ export class WebSpeechSttProvider implements SttProvider {
       if (!finalText.trim()) {
         // Still speaking: surface the interim transcript and wait for the final.
         const live = interimText.trim();
-        if (live) {
+        if (live && this.acceptsForegroundVoice()) {
           this.partialCallback?.(live);
         }
         return;
       }
 
       const text = finalText.trim();
-      if (hasRecognizedWord(text)) {
+      if (hasRecognizedWord(text) && this.acceptsForegroundVoice()) {
         this.emit({ kind: "transcript", text });
       } else {
+        // Valid words without a foreground signal are most likely another vendor,
+        // a passer-by, music, or a loudspeaker and are intentionally discarded.
         this.emit({ kind: "no-match" });
       }
     };
@@ -297,6 +401,7 @@ export class WebSpeechSttProvider implements SttProvider {
   stop(): void {
     this.clearTimer("noSpeech");
     this.clearTimer("maxCapture");
+    this.stopForegroundMonitor();
     if (this.recognition) {
       try {
         this.recognition.stop();
@@ -330,7 +435,94 @@ export class WebSpeechSttProvider implements SttProvider {
     if (this.settled) return;
     this.settled = true;
     this.cleanupTimers();
+    this.stopForegroundMonitor();
     this.callback?.(result);
+  }
+
+  private acceptsForegroundVoice(): boolean {
+    return this.foregroundMonitorBypassed || this.foregroundDetected;
+  }
+
+  /**
+   * Run a second, noise-suppressed level monitor alongside Web Speech.  The monitor
+   * never records or uploads audio; it only calculates local RMS values used to
+   * decide whether the recognized words came from a nearby foreground speaker.
+   */
+  private startForegroundMonitor(): void {
+    const mediaDevices = typeof navigator === "undefined" ? undefined : navigator.mediaDevices;
+    const audioCtor = typeof window === "undefined"
+      ? undefined
+      : window.AudioContext
+        ?? (window as unknown as WindowWithWebkitAudioContext).webkitAudioContext;
+    if (!mediaDevices?.getUserMedia || !audioCtor) {
+      this.foregroundMonitorBypassed = true;
+      return;
+    }
+
+    const token = ++this.foregroundMonitorToken;
+    let ctx: AudioContext;
+    try {
+      ctx = new audioCtor();
+      this.foregroundAudioCtx = ctx;
+      void ctx.resume().catch(() => undefined);
+    } catch {
+      this.foregroundMonitorBypassed = true;
+      return;
+    }
+
+    void mediaDevices.getUserMedia({ audio: MARKET_AUDIO_CONSTRAINTS })
+      .then((stream) => {
+        if (token !== this.foregroundMonitorToken || this.settled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        this.foregroundStream = stream;
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        analyser.smoothingTimeConstant = 0.15;
+        ctx.createMediaStreamSource(stream).connect(analyser);
+
+        const samples = new Float32Array(analyser.fftSize);
+        const gate = new ForegroundVoiceGate(performance.now());
+        const tick = (): void => {
+          if (token !== this.foregroundMonitorToken || this.settled) return;
+          analyser.getFloatTimeDomainData(samples);
+          let sumSquares = 0;
+          for (const sample of samples) sumSquares += sample * sample;
+          const rms = Math.sqrt(sumSquares / samples.length);
+          gate.observe(rms, performance.now());
+          if (gate.detected) {
+            this.foregroundDetected = true;
+            this.speechStarted = true;
+            this.clearTimer("noSpeech");
+          }
+          this.foregroundRafId = requestAnimationFrame(tick);
+        };
+        this.foregroundRafId = requestAnimationFrame(tick);
+      })
+      .catch(() => {
+        if (token !== this.foregroundMonitorToken) return;
+        // SpeechRecognition will report a permission/device error if the mic really
+        // is unavailable.  Fail open here for browsers that support Web Speech but
+        // don't expose a separately shareable MediaStream.
+        this.foregroundMonitorBypassed = true;
+        void ctx.close();
+        if (this.foregroundAudioCtx === ctx) this.foregroundAudioCtx = null;
+      });
+  }
+
+  private stopForegroundMonitor(): void {
+    this.foregroundMonitorToken += 1;
+    if (this.foregroundRafId !== null) {
+      cancelAnimationFrame(this.foregroundRafId);
+      this.foregroundRafId = null;
+    }
+    this.foregroundStream?.getTracks().forEach((track) => track.stop());
+    this.foregroundStream = null;
+    if (this.foregroundAudioCtx) {
+      void this.foregroundAudioCtx.close();
+      this.foregroundAudioCtx = null;
+    }
   }
 
   private clearTimer(which: "noSpeech" | "maxCapture" | "result"): void {
@@ -375,8 +567,6 @@ export class WebSpeechSttProvider implements SttProvider {
 /** RMS amplitude (0..1) above which mic input counts as "speech" for the
  * client-side end-of-speech detector (there is no server-side VAD feedback loop
  * here; faster-whisper's own VAD filter still cleans up the final transcript). */
-const LOCAL_STT_SPEECH_THRESHOLD = 0.02;
-
 interface WindowWithWebkitAudioContext {
   webkitAudioContext?: typeof AudioContext;
 }
@@ -428,7 +618,7 @@ export class LocalSttProvider implements SttProvider {
   private async beginCapture(): Promise<void> {
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: MARKET_AUDIO_CONSTRAINTS });
     } catch {
       this.emit({ kind: "error", reason: "mic-unavailable" });
       return;
@@ -476,6 +666,7 @@ export class LocalSttProvider implements SttProvider {
     analyser.fftSize = 512;
     ctx.createMediaStreamSource(stream).connect(analyser);
     this.audioCtx = ctx;
+    const gate = new ForegroundVoiceGate(performance.now());
 
     const data = new Uint8Array(analyser.fftSize);
     const tick = (): void => {
@@ -487,7 +678,8 @@ export class LocalSttProvider implements SttProvider {
       }
       const rms = Math.sqrt(sumSquares / data.length);
 
-      if (rms > LOCAL_STT_SPEECH_THRESHOLD) {
+      const aboveForegroundGate = gate.observe(rms, performance.now());
+      if (gate.detected && aboveForegroundGate) {
         this.speechStarted = true;
         this.clearTimer("noSpeech");
         this.clearTimer("silence");
@@ -533,9 +725,18 @@ export class LocalSttProvider implements SttProvider {
         this.emit({ kind: "error", reason: "network" });
         return;
       }
-      const data = (await response.json()) as { text?: string };
+      const data = (await response.json()) as {
+        text?: string;
+        language?: string;
+        language_probability?: number;
+      };
       const text = (data.text ?? "").trim();
-      this.emit(text ? { kind: "transcript", text } : { kind: "no-match" });
+      this.emit(text ? {
+        kind: "transcript",
+        text,
+        detectedLanguage: data.language,
+        languageConfidence: data.language_probability,
+      } : { kind: "no-match" });
     } catch {
       this.emit({ kind: "error", reason: "network" });
     }

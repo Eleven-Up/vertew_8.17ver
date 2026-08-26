@@ -34,7 +34,7 @@ Customer approaches
 
 - English is the default; English, Korean and Malay are supported.
 - Customer-selected language has priority over automatic detection.
-- Demo products are Watermelon, Mango, Banana and Apple; menu data is managed by the backend.
+- Demo products are Nasi Lemak, Tteokbokki, Nasi Goreng, Beef Noodle Soup and Hainanese Chicken Rice — one signature street dish per country; menu data is managed by the backend.
 - Orders reach the vendor dashboard in real time.
 - Statuses: `PENDING`, `ACCEPTED`, `PREPARING`, `READY`, `COMPLETED`, `REJECTED`.
 - At `READY`, the customer receives a localized popup that remains until **OK** is pressed.
@@ -42,12 +42,14 @@ Customer approaches
 - Missed ready events are recovered through periodic REST checks.
 - Official greeting and menu videos run through a non-interrupting event queue.
 - Debug Mode simulates sensor, language, QR and order events without Raspberry Pi hardware.
+- Microphone capture enables browser noise suppression and an adaptive foreground-voice gate so short noise spikes and quieter background conversations are not sent as customer turns.
 - The demo runs without an AI API key using multilingual rule-based menu, price and ordering responses.
 - Gemini or a Factchat-compatible provider can be enabled for richer conversation, with local fallback on failure.
 
 ### Known limitations
 
 - Browser STT/TTS depends on microphone permission, browser, OS and installed voices.
+- A single microphone cannot verify a person's identity; the foreground gate favors the nearest/loudest sustained speaker. A directional kiosk microphone is still recommended for very loud markets.
 - Korean or Malay TTS may use a fallback system voice.
 - Without an external AI key, unrestricted generative conversation is not available.
 - The character uses a 2D image with CSS motion. Natural joint animation and high-quality lip-sync require aligned transparent layers, Live2D, Spine or dedicated animation assets.
@@ -85,7 +87,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 Open:
 
 - Hologram: `http://localhost:8000/?display=hologram`
-- Tablet mode: `http://localhost:8000/?display=tablet`
+- Tablet mode (7-inch landscape, 1024x600 and 800x480): `http://localhost:8000/?display=tablet`
 - Customer ordering: `http://localhost:8000/order/store/demo`
 - Vendor dashboard: `http://localhost:8000/vendor?store=demo`
 - Mock console: `http://localhost:8000/mock.html`
@@ -196,7 +198,7 @@ Vertew는 길거리 노점과 소규모 판매자를 위한 저비용 AI 판매 
 
 - 전체 기본 언어는 영어이며 영어, 한국어, 말레이어를 지원합니다.
 - 고객이 선택한 언어가 자동 감지 언어보다 우선합니다.
-- 데모 상품은 Watermelon, Mango, Banana, Apple이며 메뉴는 백엔드에서 관리합니다.
+- 데모 상품은 나시 르막, 떡볶이, 나시 고렝, 우육면, 하이난 치킨 라이스로 나라별 대표 길거리 음식이며 메뉴는 백엔드에서 관리합니다.
 - 고객 주문은 Vendor Dashboard에 실시간으로 전달됩니다.
 - 주문 상태는 `PENDING`, `ACCEPTED`, `PREPARING`, `READY`, `COMPLETED`, `REJECTED`입니다.
 - 주문이 `READY`가 되면 고객 페이지에 현재 언어로 팝업이 표시되고 **확인**을 누를 때까지 유지됩니다.

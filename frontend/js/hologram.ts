@@ -134,6 +134,19 @@ export async function getCustomerSession(sessionId: string): Promise<{ id: strin
   return response.json() as Promise<{ id: string; language: string; order_id: string | null }>;
 }
 
+export async function updateCustomerLanguage(
+  sessionId: string,
+  language: "en" | "ko" | "ms",
+): Promise<{ id: string; language: string }> {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/language`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ language, language_source: "user_selected" }),
+  });
+  if (!response.ok) throw new Error("Could not update customer language");
+  return response.json() as Promise<{ id: string; language: string }>;
+}
+
 export async function getOrder(orderId: string): Promise<{ id: string; status: string; order_number: number; customer_language: string }> {
   const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`);
   if (!response.ok) throw new Error("Could not load order");
@@ -169,11 +182,18 @@ export async function getActiveOrders(storeId: string): Promise<BoardOrder[]> {
 export async function analyzeTranscript(
   sessionId: string,
   transcript: string,
+  detectedLanguage?: string,
+  languageConfidence?: number,
 ): Promise<{ language: string; confidence: number; intent: string; current_language: string }> {
   const response = await fetch("/api/ai/analyze-transcript", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, transcript }),
+    body: JSON.stringify({
+      session_id: sessionId,
+      transcript,
+      detected_language: detectedLanguage,
+      language_confidence: languageConfidence,
+    }),
   });
   if (!response.ok) throw new Error("Could not analyze transcript");
   return response.json() as Promise<{

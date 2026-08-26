@@ -23,11 +23,11 @@ print(f"key          : {'set (' + str(len(key)) + ' chars)' if key else 'MISSING
 print("-" * 60)
 
 PROMPT = (
-    "PERSONA:\nYou are a friendly street-market fruit vendor character.\n\n"
-    "STORE AND PRODUCT INFORMATION:\nStore name: Vertew Fresh Fruits\n"
-    "Products: MENU: Mango - Price: MYR 5.00. Spice: not spicy. "
-    "Ingredients: Fresh mango. Allergens: none declared.\n\n"
-    "CUSTOMER MESSAGE:\n이 망고에 뭔가 들어가요?\n\n"
+    "PERSONA:\nYou are a friendly street-food vendor character.\n\n"
+    "STORE AND PRODUCT INFORMATION:\nStore name: Vertew Street Kitchen\n"
+    "Products: MENU: Nasi Goreng - Price: MYR 8.00. Spice: mild. "
+    "Ingredients: rice, chicken, egg, sambal, shallots. Allergens: egg.\n\n"
+    "CUSTOMER MESSAGE:\n이 나시고랭에 뭔가 들어가요?\n\n"
     "INSTRUCTIONS:\n"
     "- Respond with exactly one JSON object and nothing else.\n"
     '- Fields: "text" (non-empty, <=500 chars), "emotion" (one of: angry, happy, '

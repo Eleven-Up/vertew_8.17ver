@@ -295,7 +295,7 @@ def build(
         '  - "order_items": include this ONLY when the customer\'s message just now '
         "clearly asks to order one or more specific MENU items (with or without a "
         "quantity). An array of objects, each "
-        '{"product_id": <the bracketed id from MENU, e.g. "mango">, "quantity": '
+        '{"product_id": <the bracketed id from MENU, e.g. "nasi_goreng">, "quantity": '
         "<a positive integer; use 1 if no quantity was said>}. Only the item(s) "
         "ordered in THIS message, not earlier turns. Omit this field entirely (or "
         "use an empty array) when nothing was ordered in this message -- a question "

@@ -103,7 +103,7 @@ def _slugify(value: str) -> str:
 
 def _unique_product_id(store: DataStore, store_id: str, name_en: str) -> str:
     """Derive a stable product id from the English name, disambiguating against
-    the store's existing catalog (e.g. "mango", then "mango-2")."""
+    the store's existing catalog (e.g. "nasi-goreng", then "nasi-goreng-2")."""
     base = _slugify(name_en)
     existing = {product.id for product in store.list_products(store_id)}
     if base not in existing:

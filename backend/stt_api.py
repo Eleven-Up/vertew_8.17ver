@@ -1,9 +1,9 @@
-"""Local Speech-to-Text API: transcribe one recorded audio clip via faster-whisper.
+"""Server Speech-to-Text API: transcribe one recorded audio clip.
 
 Plain HTTP (not the conversation WebSocket) so it composes cleanly with the
 Kiosk_UI's SttProvider abstraction -- see frontend/js/speech.ts's LocalSttProvider,
 which records with MediaRecorder client-side and posts the finished clip here.
-Only reachable/meaningful when STT_PROVIDER=local (see /api/stt/config).
+Only reachable/meaningful when STT_PROVIDER=local or groq (see /api/stt/config).
 """
 
 from __future__ import annotations
@@ -21,13 +21,13 @@ MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
 
 @router.get("/config")
-def stt_config() -> dict:
+def stt_config() -> dict[str, str]:
     """Tell the Kiosk_UI which STT backend to use for this deployment."""
     return {"provider": "local" if stt.is_local_provider_enabled() else "browser"}
 
 
 @router.post("/transcribe")
-async def transcribe(audio: UploadFile) -> dict:
+async def transcribe(audio: UploadFile) -> dict[str, object]:
     """Transcribe one uploaded audio clip and return its text plus the language
     Whisper detected from the audio itself (code, confidence 0..1) -- the
     Kiosk_UI feeds this into the session's language auto-detection alongside
@@ -38,7 +38,12 @@ async def transcribe(audio: UploadFile) -> dict:
     if len(body) > MAX_AUDIO_BYTES:
         raise HTTPException(413, "Audio clip too large")
     try:
-        text, language, confidence = await run_in_threadpool(stt.get_engine().transcribe, body)
+        text, language, confidence = await run_in_threadpool(
+            stt.get_engine().transcribe,
+            body,
+            audio.filename or "clip.webm",
+            audio.content_type or "audio/webm",
+        )
     except stt.SttUnavailableError as exc:
-        raise HTTPException(503, f"Local STT unavailable: {exc}") from exc
+        raise HTTPException(503, f"Server STT unavailable: {exc}") from exc
     return {"text": text, "language": language, "language_probability": confidence}

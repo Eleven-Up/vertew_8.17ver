@@ -24,7 +24,12 @@ export interface CharacterResponse {
 }
 
 export type SttResult =
-  | { kind: "transcript"; text: string }
+  | {
+      kind: "transcript";
+      text: string;
+      detectedLanguage?: string;
+      languageConfidence?: number;
+    }
   | { kind: "no-match" }
   | { kind: "error"; reason: "network" | "timeout" | "mic-unavailable" };
 
